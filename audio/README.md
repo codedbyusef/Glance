@@ -70,15 +70,15 @@ curl -s -H "Authorization: Bearer $GLANCE_STT_TOKEN" -H "Content-Type: audio/wav
 Until Vultr is set up, the STT server runs on a Windows PC with an NVIDIA GPU. The client only needs `GLANCE_STT_URL=http://100.112.104.87:8001` (decision 17). PowerShell on the GPU PC, from the repo root:
 
 ```powershell
-python -m venv audio\.venv-server
-audio\.venv-server\Scripts\python -m pip install --upgrade pip
-audio\.venv-server\Scripts\pip install -r audio\requirements-server-windows.txt
+python -m venv audio\.venv
+audio\.venv\Scripts\python -m pip install --upgrade pip
+audio\.venv\Scripts\pip install -r audio\requirements-server-windows.txt
 
 $env:GLANCE_STT_TOKEN = "<long random token; same value on the laptop>"
 $env:GLANCE_STT_MODEL = "small.en"
 $env:GLANCE_STT_DEVICE = "cuda"
 # $env:GLANCE_STT_INITIAL_PROMPT = "none"     # for the A/B run without the prompt
-audio\.venv-server\Scripts\python -m uvicorn audio.server.stt_service:app --host 0.0.0.0 --port 8001
+audio\.venv\Scripts\python -m uvicorn audio.server.stt_service:app --host 0.0.0.0 --port 8001
 ```
 
 The startup log prints the CUDA DLL folders it added, then `ready in ...: {'model': 'small.en', 'device': 'cuda', 'beam_size': 5, 'initial_prompt': ...}`.
@@ -100,7 +100,7 @@ From the laptop:
 
 ```powershell
 $env:GLANCE_STT_URL = "http://100.112.104.87:8001"; $env:GLANCE_STT_TOKEN = "<same token>"
-audio\.venv\Scripts\python -m audio.cli stt-check
+.venv\Scripts\python -m audio.cli stt-check          # laptop, root venv
 ```
 
 ## Pi: setup from a fresh Raspberry Pi OS (64-bit)
