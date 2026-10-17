@@ -32,6 +32,12 @@ def test_coverage():
     assert boxes.coverage(None, target) == 0.0
 
 
+def test_iou():
+    assert boxes.iou((0, 0, 10, 10), (0, 0, 10, 10)) == 1.0
+    assert boxes.iou((0, 0, 10, 10), (5, 0, 15, 10)) == pytest.approx(50 / 150)
+    assert boxes.iou((0, 0, 10, 10), (20, 20, 30, 30)) == 0.0
+
+
 def test_contains_and_distance():
     box = (10, 10, 20, 20)
     assert boxes.contains(box, (15, 15))

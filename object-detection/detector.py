@@ -38,6 +38,14 @@ def score_gap(candidates: list[Detection]) -> Optional[float]:
     return candidates[0].score - candidates[1].score
 
 
+def drop_oversized(candidates: list[Detection], width: int, height: int, max_frac: float) -> list[Detection]:
+    """Remove boxes covering more than `max_frac` of the frame. When the target is absent,
+    Grounding DINO tends to box the whole table or blanket with a mid score instead of
+    returning nothing; a reachable object never fills most of the head-camera view."""
+    limit = max_frac * width * height
+    return [d for d in candidates if boxes.area(d.box) <= limit]
+
+
 def prompt_for(phrase: str) -> str:
     """Grounding DINO wants lowercase text ending in a period."""
     phrase = phrase.strip().lower().rstrip(".")
@@ -53,12 +61,13 @@ class GroundingDinoDetector:
         cfg = cfg or full["detector"]
         self.box_threshold = float(cfg["box_threshold"])
         self.text_threshold = float(cfg["text_threshold"])
+        self.max_box_frac = float(cfg["max_box_frac"])
         self.device = pick_device(full["server"]["device"])
         # fp16 only on CUDA; CPU/MPS stay in float32.
         self.dtype = torch.float16 if (self.device == "cuda" and full["server"]["fp16"]) else torch.float32
 
         self.processor = AutoProcessor.from_pretrained(cfg["model_id"])
-        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(cfg["model_id"], torch_dtype=self.dtype)
+        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(cfg["model_id"], dtype=self.dtype)
         self.model.to(self.device).eval()
 
     def detect(self, image: np.ndarray, phrase: str) -> list[Detection]:
@@ -88,6 +97,7 @@ class GroundingDinoDetector:
             Detection(box=boxes.clip(box, width, height), score=float(score), label=str(label))
             for box, score, label in zip(result["boxes"].float().tolist(), result["scores"].float().tolist(), labels)
         ]
+        candidates = drop_oversized(candidates, width, height, self.max_box_frac)
         candidates.sort(key=lambda d: d.score, reverse=True)
         return candidates
 

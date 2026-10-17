@@ -90,6 +90,7 @@ def new_session(target: str, refer: str) -> ReachSession:
         _models["detector"],
         _models["tracker"],
         lost_frames=int(cfg["tracker"]["lost_frames"]),
+        reacquire_min_iou=float(cfg["tracker"]["reacquire_min_iou"]),
         ambiguous_gap=float(cfg["detector"]["ambiguous_gap"]),
     )
     return ReachSession(target, refer, follower, cfg["reach_session"], hand=hand_reader())

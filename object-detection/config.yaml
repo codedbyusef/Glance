@@ -28,6 +28,7 @@ detector:
   model_id: IDEA-Research/grounding-dino-tiny   # or grounding-dino-base (slower, better on long phrases)
   box_threshold: 0.15   # keep candidates at or above this score (low on purpose; the top box is used)
   text_threshold: 0.15
+  max_box_frac: 0.6     # drop boxes covering more of the frame than this (absent target -> whole-scene box)
   ambiguous_gap: 0.0    # top-two score gap below this -> `ambiguous`. 0 = off: the agent
                         # (agent/CLAUDE.md section 10) has no `ambiguous` status yet. Try 0.03 once it does.
 
@@ -38,6 +39,8 @@ tracker:
   min_mask_frac: 0.0005 # a mask smaller than this fraction of the frame counts as gone
   min_score: 0.5        # SAM 2 object score (sigmoid) below this counts as gone
   lost_frames: 4        # frames in a row with no usable mask before re-running the detector
+  reacquire_min_iou: 0.1  # re-acquire only takes a box overlapping the last box by this IoU
+                          # (else a look-alike elsewhere in the frame steals the reach)
 
 # Reach session thresholds (object-detection/CLAUDE.md "End statuses").
 reach_session:

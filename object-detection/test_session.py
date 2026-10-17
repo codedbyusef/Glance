@@ -85,13 +85,46 @@ def test_reacquire_runs_detector_once_after_lost_frames():
 
 
 def test_reacquire_success_reseeds_tracker():
-    det = FakeDetector([hit(), hit(box=(10, 10, 50, 50))])
+    det = FakeDetector([hit(), hit(box=(110, 110, 210, 210))])
     trk = FakeTracker([None, None])
     f = TargetFollower(det, trk, lost_frames=2)
     f.acquire(FRAME, "paper")
     f.step(FRAME)
     upd = f.step(FRAME)
-    assert upd.reacquired and upd.box == (10, 10, 50, 50) and trk.inits == 2
+    assert upd.reacquired and upd.box == (110, 110, 210, 210) and trk.inits == 2
+
+
+def test_reacquire_ignores_lookalike_far_from_last_box():
+    # The hand hides the target; the detector's top box is a second, similar object across the frame.
+    det = FakeDetector([hit(), hit(score=0.8, box=(0, 0, 40, 40))])
+    trk = FakeTracker([None, None])
+    f = TargetFollower(det, trk, lost_frames=2, reacquire_min_iou=0.1)
+    f.acquire(FRAME, "paper")
+    f.step(FRAME)
+    upd = f.step(FRAME)
+    assert upd.reacquire_failed and upd.box is None
+    assert trk.inits == 1 and f.last_box == BOX   # tracker not re-seeded on the look-alike
+
+
+def test_reacquire_prefers_near_candidate_over_higher_far_one():
+    near = (105.0, 95.0, 205.0, 195.0)
+    det = FakeDetector([hit(), [Detection((0, 0, 40, 40), 0.8, "far"), Detection(near, 0.4, "near")]])
+    trk = FakeTracker([None, None])
+    f = TargetFollower(det, trk, lost_frames=2, reacquire_min_iou=0.1)
+    f.acquire(FRAME, "paper")
+    f.step(FRAME)
+    upd = f.step(FRAME)
+    assert upd.reacquired and upd.box == near and trk.box == near and upd.confidence == 0.4
+
+
+def test_reacquire_ignores_nearby_box_that_does_not_overlap():
+    # Real-model case: a weak box just above the occluded plant, center close but no overlap.
+    det = FakeDetector([hit(), hit(score=0.18, box=(130.0, 80.0, 170.0, 99.0))])
+    trk = FakeTracker([None, None])
+    f = TargetFollower(det, trk, lost_frames=2, reacquire_min_iou=0.1)
+    f.acquire(FRAME, "paper")
+    f.step(FRAME)
+    assert f.step(FRAME).reacquire_failed and trk.inits == 1
 
 
 # --- session statuses ----------------------------------------------------------

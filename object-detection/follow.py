@@ -4,8 +4,9 @@
    The top box at or above the score threshold seeds SAM 2 on that same frame.
 2. step(): every later frame, SAM 2 updates the mask -> box + confidence.
 3. If the mask is gone for `lost_frames` frames in a row, Grounding DINO runs once
-   to re-acquire. If that fails, `reacquire_failed` is set and the session decides
-   between target_lost and success(inferred) (session.py).
+   to re-acquire, taking only a box that overlaps where the target was last seen (a
+   look-alike elsewhere in the frame is ignored). If that fails, `reacquire_failed` is set
+   and the session decides between target_lost and success(inferred) (session.py).
 
 Model-free: takes any Detector and Tracker, so tests and laptop runs can pass fakes.
 """
@@ -40,11 +41,19 @@ class FollowUpdate:
 
 
 class TargetFollower:
-    def __init__(self, detector: Detector, tracker: Tracker, lost_frames: int = 4, ambiguous_gap: float = 0.0):
+    def __init__(
+        self,
+        detector: Detector,
+        tracker: Tracker,
+        lost_frames: int = 4,
+        ambiguous_gap: float = 0.0,
+        reacquire_min_iou: float = 0.1,
+    ):
         self.detector = detector
         self.tracker = tracker
         self.lost_frames = lost_frames
         self.ambiguous_gap = ambiguous_gap
+        self.reacquire_min_iou = reacquire_min_iou
         self.phrase = ""
         self.last_box: Optional[boxes.Box] = None
         self._missing = 0
@@ -82,11 +91,23 @@ class TargetFollower:
         # Mask gone for several frames: one re-acquire attempt with the detector.
         self._retried = True
         candidates = self.detector.detect(frame, self.phrase)
-        if not candidates:
+        top = self._near_last_box(candidates)
+        if top is None:
+            # Nothing near where the target was. A look-alike elsewhere is not taken; the tracker
+            # keeps its memory and may still pick the target up when the hand moves away.
             return FollowUpdate(box=None, confidence=0.0, reacquire_failed=True, candidates=candidates)
-        top = candidates[0]
         self.tracker.init(frame, top.box)
         self.last_box = top.box
         self._missing = 0
         self._retried = False
         return FollowUpdate(box=top.box, confidence=top.score, reacquired=True, candidates=candidates)
+
+    def _near_last_box(self, candidates: list[Detection]) -> Optional[Detection]:
+        """Best-scoring candidate overlapping the last box by at least reacquire_min_iou.
+        Candidates are sorted best first."""
+        if self.last_box is None:
+            return candidates[0] if candidates else None
+        for d in candidates:
+            if boxes.iou(d.box, self.last_box) >= self.reacquire_min_iou:
+                return d
+        return None

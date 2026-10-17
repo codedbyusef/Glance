@@ -40,6 +40,12 @@ def intersection(a: Sequence[float], b: Sequence[float]) -> float:
     return area((max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])))
 
 
+def iou(a: Sequence[float], b: Sequence[float]) -> float:
+    inter = intersection(a, b)
+    union = area(a) + area(b) - inter
+    return inter / union if union > 0 else 0.0
+
+
 def coverage(cover: Optional[Sequence[float]], target: Optional[Sequence[float]]) -> float:
     """Fraction of `target` covered by `cover` (0-1). Used for the inferred-success rule."""
     if cover is None or target is None or area(target) == 0:

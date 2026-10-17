@@ -8,6 +8,7 @@ httpx                   # FastAPI TestClient in the tests
 
 # Server (Vultr GPU, or laptop-only runs). On Vultr these come from the Docker image.
 torch
+torchvision             # SAM 2 image processor needs it
 transformers>=4.56      # Grounding DINO + Sam2VideoModel (streaming)
 fastapi
 uvicorn[standard]

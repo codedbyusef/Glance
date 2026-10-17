@@ -45,7 +45,7 @@ class Sam2Tracker:
         self.dtype = torch.float16 if (self.device == "cuda" and full["server"]["fp16"]) else torch.float32
 
         self.processor = Sam2VideoProcessor.from_pretrained(cfg["model_id"])
-        self.model = Sam2VideoModel.from_pretrained(cfg["model_id"], torch_dtype=self.dtype)
+        self.model = Sam2VideoModel.from_pretrained(cfg["model_id"], dtype=self.dtype)
         self.model.to(self.device).eval()
 
         self._session = None
