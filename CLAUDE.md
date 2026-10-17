@@ -48,7 +48,7 @@ Freeze scope after the first working reach. Do not add features before then.
 | Wake word | Hear the phrase, then record to end of speech | openWakeWord ("hey jarvis" pretrained), VAD, push-to-talk backup | Laptop |
 | Speech to text | Audio clip in, text out | faster-whisper (small or distilled) | Vultr |
 | LLM planner | Transcript + one frame + state -> JSON plan; replan on events | Vision-capable LLM API (Gemini preferred) | API |
-| Perception server | Find target, track it, locate hand, estimate depth | OWLv2 or Grounding DINO, SAM 2 (CSRT fallback), MediaPipe Hands, Depth Anything V2 | Vultr (hand pose may run on the laptop) |
+| Perception server | Find target, disambiguate, track it, locate hand, estimate depth | Grounding DINO / OWLv2 / YOLO-World (benchmark), VLM disambiguator, SAM 2 video tracker, MediaPipe Hands, Depth Anything V2 | Vultr (hand pose may run on the laptop) |
 | Guidance controller | Hand-to-target error -> 8 motor values | Plain Python, no model | Laptop |
 | Orchestrator | Session state machine; runs plan steps; routes events to planner | Explicit enum state machine | Laptop |
 | Audio out and reader | Speak audio steps; read printed text | Piper or API TTS; VLM or PaddleOCR + LLM | Mixed |
@@ -58,40 +58,76 @@ Freeze scope after the first working reach. Do not add features before then.
 ```json
 {"steps": [
   {"type": "audio", "text": "Walk forward about 4 steps toward the desk."},
-  {"type": "haptic", "action": "reach", "target": "sheet of paper", "success": "hand_on_target"},
+  {"type": "haptic", "action": "reach", "target": "sheet of paper", "refer": "the sheet of paper on the table"},
   {"type": "read", "region": "held_object"}
 ]}
 ```
 
-- `reach(target)` is the only haptic action. Grasp, lift and turn become audio steps.
-- Targets are short noun phrases ("red soda can") because they go straight into the open-vocabulary detector.
+- `reach(target, refer)` is the only haptic action. Grasp, lift and turn become audio steps.
+- `target` is a 1-4 word noun phrase, no positions ("red soda can", "door handle") -- it goes straight into the open-vocabulary detector. `refer` is a fuller description used only to disambiguate between similar candidates ("the red can on the table"); position words in it may be stale if the user moved.
 - Distances are spoken as "about", with a "say done when you arrive" confirmation.
 - Ambiguity (three cups) becomes a spoken question.
 - The planner must list hazards (stairs, glass, open drawer, person in path) before any walking instruction.
 - The planner refuses haptic targets that are hot or sharp (stove burner, knife) and says so aloud.
 
-### Orchestrator <-> vision loop
+### Object detection and tracking (settled)
 
-Commands to vision:
-```json
-{"cmd": "start_reach", "target": "red soda can", "success": "hand_on_target"}
-{"cmd": "stop"}
-```
-Events from vision (each triggers a replan with a fresh frame, except step_done):
-```json
-{"event": "step_done"}  {"event": "target_not_found"}  {"event": "target_lost"}
-{"event": "hand_lost"}  {"event": "timeout"}           {"event": "user_stop"}
-```
-Keep these names identical everywhere (planner prompt, orchestrator, vision loop, logs).
+When the user is within arm's reach of the target, the orchestrator calls `reach(target, refer)` on the
+vision side, which finds that object in the glasses-camera frame and keeps it located while the glove
+guides the hand. Frames are not mirrored: image left = user's left.
+
+**Pipeline** (re-run from step 1 on re-acquire):
+1. Open-vocab detector on `target`: Grounding DINO, OWLv2, or YOLO-World. All take a text query and need
+   no training; a fixed-class YOLO can't cover arbitrary objects. Tradeoffs to verify: YOLO-World fastest,
+   Grounding DINO best on descriptive phrases, OWLv2 good on short nouns but weak on relations. Benchmark
+   on the demo objects and check licenses before committing.
+2. Several candidates: draw numbered boxes and have a VLM (Qwen-VL class or Florence-2) pick one using
+   `refer`, or have it ground `refer` directly. Runs once per reach, so a few hundred ms is fine.
+3. Seed SAM 2's video tracker with the chosen box. SAM 2 runs every frame; the detector only runs at
+   session start and on re-acquire.
+4. Depth Anything V2 on small patches around the target and the hand, every few frames. Absolute values
+   are noisy -- only ordering matters. It drives forward/back and proximity and is the weakest signal, so
+   test it early.
+5. No fine-tuning unless the pretrained models fail on our objects.
+
+Per frame, the server reports: target box, tracking confidence, depth at target and hand, frame id, timestamps.
+
+**Session contract**: `start(target, refer)` returns a session id, plus `pause`, `resume`, `cancel`.
+`pause` zeroes the motors and freezes the loss timers. Resuming after more than ~3 s re-runs the detector.
+Motors go to zero on every exit.
+
+**End statuses** (starting thresholds, tune them):
+
+| Status | Condition |
+|---|---|
+| `success` | a fingertip inside the box and hand depth near target depth for 5-10 frames in a row |
+| `success`, `inferred: true` | the target vanished, but the hand covered over half its box in the last few frames (the hand hides the object at the end of a good reach) |
+| `target_not_found` | no acquisition within ~3 s |
+| `target_lost` | gone over ~2 s without that hand overlap |
+| `hand_lost` | no hand for over ~1.5 s |
+| `stalled` | the error hasn't shrunk in ~6-8 s |
+| `timeout` | 25-30 s cap |
+| `stale_link` | no results for 500 ms |
+
+The report to the orchestrator also carries `elapsed_s`, `last_seen` (region in image thirds like
+"right-middle", depth near/mid/far, `age_s`), `closest_approach` (touching/near/far), and the last frame
+(omitted on success). Keep these status names identical everywhere (planner prompt, orchestrator, vision
+loop, logs) -- they replace the earlier `step_done`/`user_stop` event sketch.
 
 ### Perception server (WebSocket)
 
-- Client sends JPEG frames (~640x480, quality ~70) with `frame_id` and a client timestamp.
+- One Vultr GPU instance, one service, every model loaded once (detector, SAM 2, depth, Whisper), Docker on
+  a CUDA base with weights baked in and a warm-up pass, behind HTTPS with a token check. fp16 small/base
+  variants should fit a 24 GB GPU -- check which GPUs the MLH credits actually cover.
+- One WebSocket per session. Client sends JPEG frames ~320-480 px wide with `frame_id` and a client timestamp.
 - Server processes only the NEWEST frame and drops stale ones. Never build a queue; a queue makes the glove lag the hand.
-- Server returns: target box, hand point, depth values, confidence, plus its own per-stage timings.
 - Network time = laptop round trip minus server time (only the laptop clock is used).
-- Access through an SSH tunnel (`ssh -L 8000:localhost:8000 ...`) rather than a public port.
-- Detector runs at step start and on re-acquire. Tracker runs every frame. Hand pose every frame. Depth every frame or every 2nd-3rd frame on small patches.
+- Budget ~30-60 ms for tracking inside the ~200 ms capture-to-vibration target; log timestamps at every stage.
+- Also run the pipeline laptop-only, to compare latency, frame rate, and detection quality for the Vultr prize write-up.
+- Detector runs at session start and on re-acquire. Tracker (SAM 2) runs every frame. Hand pose every frame.
+  Depth every frame or every 2nd-3rd frame on small patches.
+
+Order of work: webcam + detector printing boxes, then SAM 2 + depth, then move to Vultr and measure latency.
 
 ### Guidance controller (pure rules, per frame)
 
@@ -100,7 +136,7 @@ Keep these names identical everywhere (planner prompt, orchestrator, vision loop
 - Positive dx -> right channel; negative -> left. Positive dy (target lower in image) -> down; negative -> up. Target farther than hand -> forward.
 - Wrist channel = proximity, stronger as total distance shrinks.
 - Deadband per axis, hysteresis, EMA smoothing, and at most TWO direction channels active at once.
-- Success: hand point inside the target box at near depth for N consecutive frames -> confirm pulse + `step_done`.
+- Success: hand point inside the target box at near depth for N consecutive frames -> confirm pulse + `success`.
 - Starting values (tune, not measured): deadband 0.05, hysteresis 0.03, EMA alpha 0.3, N = 5. Keep them in `config/controller.yaml`.
 - No hand in frame: zero all motors, then `hand_lost`. Tracker mask empty for several frames: re-detect once, else `target_lost`.
 - No fine-tuned or learned policy. Rules only.
@@ -147,7 +183,8 @@ Decide between A and B after the first blindfolded tester. Right hand only for t
 ## Latency
 
 The headline number is hand movement -> felt change in vibration. Log timestamps at: camera capture, network up, detection/tracking, depth, controller, network down, motor update.
-Under 300 ms is a starting proposal, not a measured fact. Set the real target after the first end-to-end measurement and record it in the eval log.
+~200 ms capture-to-vibration (with ~30-60 ms of that budgeted for tracking) is the current proposal, not a
+measured fact. Set the real target after the first end-to-end measurement and record it in the eval log.
 
 ## Proposed file structure
 
@@ -186,8 +223,8 @@ glance/
 │   ├── timing.py                # per-stage timers returned to the client
 │   └── models/
 │       ├── stt.py               # faster-whisper
-│       ├── detector.py          # OWLv2 or Grounding DINO
-│       ├── tracker.py           # SAM 2 (OpenCV CSRT fallback)
+│       ├── detector.py          # Grounding DINO / OWLv2 / YOLO-World (benchmark)
+│       ├── tracker.py           # SAM 2 video tracker, seeded by the detector box
 │       ├── hand.py              # MediaPipe Hands (can also run on the laptop)
 │       ├── depth.py             # Depth Anything V2 small
 │       └── reader.py
@@ -209,7 +246,7 @@ Do not name a package `logging` (it shadows the standard library); telemetry liv
 - Each model sits behind a small interface (input -> output) so it can be swapped or stubbed. Every model has a fake or fallback.
 - Build and test on a laptop webcam first (print dx, dy, depth) before moving any model to Vultr.
 - Move models to Vultr one at a time; record GPU memory and per-call latency after each.
-- Hardcode the plan (e.g. `start_reach("sheet of paper")`) until the loop works, then swap in the real planner.
+- Hardcode the plan (e.g. `reach("sheet of paper", "the sheet of paper on the table")`) until the loop works, then swap in the real planner.
 - Config over constants: mapping, thresholds and URLs live in `config/`.
 - Log one JSON line per frame and per event (transcript, plan, step transitions, intensities sent) so any trial can be replayed.
 - Keep it simple and demo-reliable. This is a 36-hour build; prefer boring, explicit code over abstractions.
@@ -224,6 +261,7 @@ Do not name a package `logging` (it shadows the standard library); telemetry liv
 
 ## Open decisions
 
+- Detector: Grounding DINO vs OWLv2 vs YOLO-World -- benchmark on the demo objects and check licenses before committing.
 - Wake word: pretrained "hey jarvis" for the weekend, or a custom name (stretch). The planner prompt and demo script must use the same phrase.
 - Finger mapping A vs B (decide after the first blindfolded test).
 - Camera path from head-worn camera to laptop: phone camera, USB, or WiFi stream.
