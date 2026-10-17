@@ -338,6 +338,10 @@ class FakePlayer:
     def __init__(self):
         self.busy = False
         self.window = ReplyWindow()
+        self.cues = []
+
+    def cue(self, name):
+        self.cues.append(name)
 
 
 @pytest.mark.parametrize("busy,window_open,task,expected", [
@@ -524,6 +528,33 @@ def test_hey_glance_stop_in_open_state_arrives_as_stop():
     push(mic, blocks(("q", 5), ("l", 6), ("q", 2), ("l", 5), ("q", 12)))
     assert sink.utterances() == ["stop"]
     assert_paired(sink)
+
+
+def test_wake_tone_on_every_detection():
+    player = FakePlayer()
+    mic, sink, _, _ = make_mic(player=player, scores=[0.9], wake=True)
+    push(mic, blocks(("q", 3)))
+    assert player.cues == ["wake"]
+    # also when "hey glance" interrupts an open-state capture
+    player = FakePlayer()
+    mic, sink, _, _ = make_mic(player=player, scores=[0.0] * 10 + [0.9], wake=False)
+    push(mic, blocks(("q", 5), ("l", 6), ("q", 2)))
+    assert player.cues == ["wake"] and sink.names() == ["speech_start"]
+
+
+def test_wake_tone_can_be_turned_off_and_never_breaks_the_mic():
+    player = FakePlayer()
+    mic, sink, _, _ = make_mic(player=player, scores=[0.9], wake=True, cfg=Config(wake_tone=False))
+    push(mic, blocks(("q", 3)))
+    assert player.cues == [] and sink.names() == ["speech_start"]
+
+    class BrokenPlayer(FakePlayer):
+        def cue(self, name):
+            raise RuntimeError("output gone")
+
+    mic, sink, _, _ = make_mic(player=BrokenPlayer(), scores=[0.9], wake=True)
+    push(mic, blocks(("q", 3)))
+    assert sink.names() == ["speech_start"] and mic.log.of("error")[-1]["where"] == "mic.wake_tone"
 
 
 def test_empty_utterance_keeps_reply_window_open():

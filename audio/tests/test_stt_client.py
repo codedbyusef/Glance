@@ -117,6 +117,15 @@ def test_no_primary_configured_goes_straight_to_local():
     (RawTranscript("thank you for watching"), "", "blocklist"),
     (RawTranscript("thank you"), "thank you", None),
     (RawTranscript("you there"), "you there", None),
+    # the initial prompt leaking into noise (decision 23)
+    (RawTranscript("cancel, repeat, cancel, repeat, cancel, repeat, cancel,"), "", "prompt_echo"),
+    (RawTranscript("Done, yes, no."), "", "prompt_echo"),  # more than 2 words, all from the prompt
+    (RawTranscript("stop stop stop"), "", "prompt_echo"),
+    (RawTranscript("Stop, I said stop, stop!"), "", "prompt_echo"),  # a prompt word 3 times
+    (RawTranscript("Yes, stop."), "Yes, stop.", None),  # 2 words is fine
+    (RawTranscript("No, no."), "No, no.", None),
+    (RawTranscript("wait, cancel that"), "wait, cancel that", None),
+    (RawTranscript("Can you repeat that?"), "Can you repeat that?", None),
 ])
 def test_filters(raw, expected, reason):
     t, _ = make(FakeBackend("vultr", raw))

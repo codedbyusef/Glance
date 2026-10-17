@@ -110,6 +110,7 @@ class Listener:
         self.last_wake = float("-inf")
         self.last_state: str | None = None
         self.score_hook: Callable[[float, float], None] | None = None  # (score, t), for tuning
+        self.on_wake: Callable[[], None] | None = None  # called on every wake detection (the Mic's wake tone)
 
     def state(self) -> str:
         if self.capture is not None:
@@ -181,6 +182,8 @@ class Listener:
         at = t + BLOCK_S
         self.log.write("wake", score=round(score, 3), model=getattr(self.detector, "name", None),
                        state=state, during=cap.source if cap is not None else None)
+        if self.on_wake is not None:
+            self.on_wake()
         if cap is None:
             self.log.write("speech_start", source="wake", at=round(at, 4))
             # No pre-roll, and nothing is kept until the wake phrase has ended, so it stays out of the clip.
@@ -290,6 +293,8 @@ class Mic:
         self.log = log or null_log()
         self.listener = Listener(cfg, vad, detector, lambda: self.wake_needed(), self.log)
         self.wake_phrase = wake_phrase_pattern(cfg.assistant_name)
+        if cfg.wake_tone and player is not None:
+            self.listener.on_wake = self._wake_tone
         self.q: queue.Queue = queue.Queue(maxsize=250)  # 20 s of blocks
         self.open_starts = 0  # speech_starts not yet answered by an utterance
         self.idle = threading.Event()  # set while the worker waits for input (tests)
@@ -360,6 +365,13 @@ class Mic:
         self.listener.reset()
         while self.open_starts > 0:
             self._deliver_text("", time.time(), None, "error")
+
+    def _wake_tone(self) -> None:
+        """A short tone that says "I heard you"; the Player drops it if anything is playing."""
+        try:
+            self.player.cue("wake")
+        except Exception as e:
+            self.log.error("mic.wake_tone", e)
 
     # ---------------------------------------------------------------- work
 

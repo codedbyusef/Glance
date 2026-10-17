@@ -130,15 +130,18 @@ def cmd_stt_bench(args, cfg) -> int:
             if not ok:
                 print(f"  [{backend.name}] MISS {path.name}: want {label!r} got {r.text!r} {r.dropped_reason or ''}")
 
-    print(f"\n{'backend':8} {'clips':>5} {'exact':>7} {'cmds':>7} {'p50 ms':>7} {'p95 ms':>7} {'failed':>6}")
+    print(f"\n{'backend':8} {'clips':>5} {'exact':>7} {'cmds':>7} {'noise':>7} {'p50 ms':>7} {'p95 ms':>7}"
+          f" {'failed':>6}")
     for name in dict.fromkeys(r["backend"] for r in rows):
         rs = [r for r in rows if r["backend"] == name]
         cmds = [r for r in rs if bench_key(r["label"]) in COMMANDS]
         ms = [r["ms"] for r in rs if not r["failed"]]
         acc = sum(r["ok"] for r in rs) / len(rs)
         cacc = f"{sum(r['ok'] for r in cmds) / len(cmds):.0%}" if cmds else "-"
-        print(f"{name:8} {len(rs):5} {acc:7.0%} {cacc:>7} {percentile(ms, 50):7.0f} {percentile(ms, 95):7.0f}"
-              f" {sum(r['failed'] for r in rs):6}")
+        noise = [r for r in rs if not bench_key(r["label"])]  # labeled "": should come back empty
+        nacc = f"{sum(r['ok'] for r in noise) / len(noise):.0%}" if noise else "-"
+        print(f"{name:8} {len(rs):5} {acc:7.0%} {cacc:>7} {nacc:>7} {percentile(ms, 50):7.0f}"
+              f" {percentile(ms, 95):7.0f} {sum(r['failed'] for r in rs):6}")
     if args.out:
         with open(args.out, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0]) if rows else ["backend"])
@@ -198,7 +201,7 @@ def cmd_say(args, cfg) -> int:
     if args.rate is not None:
         cfg.speaking_rate = args.rate
     log = EventLog(cfg.path(cfg.log_dir), keep=True)
-    log.write("session", cmd="say", pid=os.getpid())
+    log.write("session", cmd="say", id=new_session_id(), pid=os.getpid())
     t0 = time.monotonic()
     player = build_player(cfg, log)
     done = threading.Event()
@@ -279,7 +282,8 @@ def cmd_listen(args, cfg, echo_back: bool = False) -> int:
         cfg.ptt = args.ptt
     t0 = time.monotonic()
     log = EventLog(cfg.path(cfg.log_dir), echo=event_printer(t0))
-    log.write("session", cmd="echo" if echo_back else "listen", pid=os.getpid())
+    sid = new_session_id()
+    log.write("session", cmd="echo" if echo_back else "listen", id=sid, pid=os.getpid())
     window = ReplyWindow(cfg.assistant_name)
     player = None
     if not args.no_tts:
@@ -336,7 +340,7 @@ def cmd_listen(args, cfg, echo_back: bool = False) -> int:
         if player is not None:
             player.close()
     print()
-    print_stats(log_stats(last_session(read_log(log_file(cfg)))))
+    print_stats(log_stats(pick_session(read_log(log_file(cfg)), sid) or []))
     return 0
 
 
@@ -360,10 +364,32 @@ def read_log(path: Path) -> list[dict]:
     return events
 
 
-def last_session(events: list[dict]) -> list[dict]:
-    """Events from the last session marker on (one listen, echo, say or selftest run)."""
-    starts = [i for i, e in enumerate(events) if e.get("event") == "session"]
-    return events[starts[-1]:] if starts else events
+def new_session_id() -> str:
+    return time.strftime("%H%M%S")  # unique within a day's log file, which is what stats reads
+
+
+def split_sessions(events: list[dict]) -> list[tuple[str, str | None, list[dict]]]:
+    """(id, cmd, events) per session marker. Events before the first marker form a session with id "-"."""
+    out: list = []
+    for e in events:
+        if e.get("event") == "session":
+            out.append((str(e.get("id") or f"#{len(out) + 1}"), e.get("cmd"), [e]))
+        elif out:
+            out[-1][2].append(e)
+        else:
+            out.append(("-", None, [e]))
+    return out
+
+
+def pick_session(events: list[dict], which: str = "last") -> list[dict] | None:
+    """last: the last listen or echo session. all: everything. Otherwise a session id."""
+    if which == "all":
+        return events
+    parts = split_sessions(events)
+    if which == "last":
+        listening = [evs for _, cmd, evs in parts if cmd in ("listen", "echo")]
+        return listening[-1] if listening else None
+    return next((evs for sid, _, evs in parts if sid == which), None)
 
 
 def _pct(values: list[float]) -> dict:
@@ -378,7 +404,7 @@ def log_stats(events: list[dict]) -> dict:
         by.setdefault(e.get("event"), []).append(e)
     get = lambda name: by.get(name, [])  # noqa: E731
     session = get("session")[-1] if get("session") else None
-    out: dict = {"cmd": session.get("cmd") if session else None,
+    out: dict = {"cmd": session.get("cmd") if session else None, "id": session.get("id") if session else None,
                  "minutes": (events[-1]["mono"] - events[0]["mono"]) / 60 if events else 0.0}
     wakes = get("wake")
     out["wakes"] = sum(1 for w in wakes if w.get("state", "wake") == "wake")
@@ -428,7 +454,7 @@ def print_stats(st: dict) -> None:
     def fmt(p):
         return "none" if not p["n"] else f"n={p['n']} p50={p['p50']:.0f} p95={p['p95']:.0f} max={p['max']:.0f}"
 
-    print(f"Session: {st['cmd'] or '?'}, {st['minutes']:.1f} min")
+    print(f"Session {st['id'] or '?'}: {st['cmd'] or '?'}, {st['minutes']:.1f} min")
     print(f"  wake detections: {st['wakes']} (scores {', '.join(f'{s:.2f}' for s in st['wake_scores']) or '-'})"
           + (f"; {st['wakes_in_open_capture']} inside open-state captures" if st["wakes_in_open_capture"] else ""))
     print(f"  speech starts: {st['speech_starts']}; utterances: {st['utterances']}"
@@ -452,7 +478,13 @@ def cmd_stats(args, cfg) -> int:
     if not events:
         print(f"no events in {path}")
         return 1
-    print_stats(log_stats(events if args.all else last_session(events)))
+    chosen = pick_session(events, args.session)
+    if chosen is None:
+        print(f"no session {args.session!r} in {path}. Sessions:")
+        for sid, cmd, evs in split_sessions(events):
+            print(f"  {sid:8} {cmd or '?':9} {len(evs)} events")
+        return 1
+    print_stats(log_stats(chosen))
     return 0
 
 
@@ -518,9 +550,9 @@ def run_selftest(cfg, player, record, backends, out=print) -> int:
     if samples is not None:
         peak = int(np.max(np.abs(samples.astype(np.int32)))) if len(samples) else 0
         rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) if len(samples) else 0.0
-        status = "FAIL" if len(samples) < 2.5 * SAMPLE_RATE or peak == 0 else "WARN" if peak < 1000 else "PASS"
+        status = "FAIL" if len(samples) < 2.5 * SAMPLE_RATE or peak == 0 else "WARN" if peak < 3000 else "PASS"
         row(status, "mic", f"{len(samples) / SAMPLE_RATE:.1f} s, peak {peak}, rms {rms:.0f}"
-            + (" (very quiet: check the mic and its input level)" if status == "WARN" else ""))
+            + (" (speak louder or check the mic)" if status == "WARN" else ""))
         wav = to_wav(samples)
         for b in backends:
             t0 = time.monotonic()
@@ -531,7 +563,9 @@ def run_selftest(cfg, player, record, backends, out=print) -> int:
                 raw = b.transcribe(wav)
                 ms = int((time.monotonic() - t0) * 1000)
                 slow = b.name == "vultr" and ms > cfg.stt_timeout_s * 1000
-                row("WARN" if slow else "PASS", f"stt {b.name}", f"{ms} ms: {raw.text!r}"
+                empty = not raw.text.strip()
+                row("WARN" if slow or empty else "PASS", f"stt {b.name}", f"{ms} ms, transcript {raw.text!r}"
+                    + (" (empty: nothing recognized as speech)" if empty else "")
                     + (" (over stt_timeout_s, so the Mic would have fallen back)" if slow else ""))
             except Exception as e:
                 row("FAIL", f"stt {b.name}", f"{int((time.monotonic() - t0) * 1000)} ms: {e}")
@@ -544,7 +578,7 @@ def cmd_selftest(args, cfg) -> int:
     from .player import build_player
 
     log = EventLog(cfg.path(cfg.log_dir))
-    log.write("session", cmd="selftest", pid=os.getpid())
+    log.write("session", cmd="selftest", id=new_session_id(), pid=os.getpid())
     player = None
     try:
         player = build_player(cfg, log)
@@ -612,10 +646,11 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--wav", help="replay a 16 kHz mono WAV in real time instead of the mic")
         sp.add_argument("--minutes", type=float, help="stop after this many minutes (soak test)")
 
-    st = sub.add_parser("stats", help="section 14.3 numbers from the event log (default: today's last session)")
+    st = sub.add_parser("stats", help="section 14.3 numbers from the event log")
     st.add_argument("--file", help="a JSONL log file (default: today's)")
     st.add_argument("--day", help="YYYYMMDD instead of today")
-    st.add_argument("--all", action="store_true", help="every session in the file, not just the last")
+    st.add_argument("--session", default="last",
+                    help="last (the last listen or echo session, the default), all, or a session id")
 
     sub.add_parser("selftest", help="play a sentence, record 3 s, transcribe with every backend (section 12)")
 

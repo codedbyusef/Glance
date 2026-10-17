@@ -131,6 +131,19 @@ def test_stop_cuts_audio_within_one_chunk(make):
     assert out.samples_written - at_stop <= int(16000 * 0.05)
 
 
+def test_wake_cue_is_shorter_and_unknown_cues_are_ignored(make):
+    out = FakeOutput(rate=16000)
+    p, reports = make(output=out)
+    p.cue("wake")
+    assert wait_until(lambda: out.samples_written >= int(16000 * 0.09))
+    time.sleep(0.05)
+    assert out.samples_written == int(16000 * 0.09)
+    p.cue("ding")
+    time.sleep(0.05)
+    assert out.samples_written == int(16000 * 0.09)
+    assert p.log.of("error")[-1]["where"] == "player.cue"
+
+
 def test_stop_logs_when_the_sound_was_cut(make):
     out = FakeOutput(rate=16000)
     p, reports = make(output=out)

@@ -143,7 +143,7 @@ python -m audio.cli echo                        # say each transcript back
 
 The wake model is `models/hey_glance.onnx`. If that file is missing, the `hey_jarvis` stand-in loads and the log says STAND-IN. If no model loads at all, push-to-talk still works.
 
-After a detection, the capture starts only when the wake phrase has ended: at the first 60 ms gap in the voice, when the score falls below `wake_end_threshold` (0.3), or after `wake_end_max_s` (1.0 s), whichever comes first. The wake model also runs during open-state captures; a detection there drops the audio up to the end of the phrase, so "hey glance, stop" arrives as "stop". A leading "hey glance" left in a transcript is stripped as a backup.
+After a detection, the capture starts only when the wake phrase has ended: at the first 60 ms gap in the voice, when the score falls below `wake_end_threshold` (0.3), or after `wake_end_max_s` (1.0 s), whichever comes first. The wake model also runs during open-state captures; a detection there drops the audio up to the end of the phrase, so "hey glance, stop" arrives as "stop". A leading "hey glance" left in a transcript is stripped as a backup. Each detection plays a short tone (`wake_tone`, on by default) unless something is already playing; wait for it before the command.
 
 Noise defaults: `vad_aggressiveness` 3, `speech_start_ms` 300 (every 20 ms frame of a 300 ms window voiced), and a capture is kept going only by voiced frames when more than half of the last 300 ms is voiced. If short commands ("no") are missed in open state, try `speech_start_ms: 260` in `config.yaml`; if mid-sentence pauses split utterances, raise `end_silence_ms`.
 
@@ -154,18 +154,19 @@ python -m audio.cli record --label "get me the can" --tag quiet   # Enter to sta
 python -m audio.cli stt-bench --out audio/clips/bench.csv          # both backends; --backends vultr or local
 ```
 
-Clips and `labels.csv` go to `audio/clips/` (gitignored, since it holds voice recordings). `stt-bench` prints exact-match accuracy (lowercased, punctuation stripped), accuracy on the command clips, and p50/p95 latency per backend. To A/B the initial prompt, restart the server with `GLANCE_STT_INITIAL_PROMPT=none` and rerun. `stt-check` calls `/health` and transcribes the bundled `assets/stt_check.wav`.
+Clips and `labels.csv` go to `audio/clips/` (gitignored, since it holds voice recordings). Noise-only clips get an empty label (`--label=` in PowerShell, which drops a bare `""` argument); the `noise` column is the share of them that came back empty. `stt-bench` prints exact-match accuracy (lowercased, punctuation stripped), accuracy on the command clips, and p50/p95 latency per backend. To A/B the initial prompt, restart the server with `GLANCE_STT_INITIAL_PROMPT=none` and rerun. `stt-check` calls `/health` and transcribes the bundled `assets/stt_check.wav`.
 
 ## Selftest, logs and stats
 
 ```bash
 python -m audio.cli selftest            # or: python -m audio.cli --selftest. Run it first after each boot at the venue
-python -m audio.cli stats               # numbers from today's log, last session (listen, echo, say or selftest)
-python -m audio.cli stats --all --day 20261017
+python -m audio.cli stats               # numbers from today's log, last listen or echo session
+python -m audio.cli stats --session 164301          # one session by id (the id is printed in the summary)
+python -m audio.cli stats --session all --day 20261017
 python -m audio.cli echo --minutes 30   # soak test; prints the session summary at the end
 ```
 
-`selftest` checks the wake model file and the env vars (it says whether the token is set, never what it is), plays a test sentence and the thinking tone, records 3 s, and transcribes the recording with the Vultr server (after `/health`) and the local fallback. It prints PASS, WARN or FAIL per line and exits 1 if anything failed.
+`selftest` checks the wake model file and the env vars (it says whether the token is set, never what it is), plays a test sentence and the thinking tone, records 3 s, and transcribes the recording with the Vultr server (after `/health`) and the local fallback. It prints PASS, WARN or FAIL per line and exits 1 if anything failed. A mic peak under 3000 or an empty transcript is a WARN: speak louder or check the mic, and run it again.
 
 Every event goes to `audio/logs/audio-YYYYMMDD.jsonl` with `mono` and `wall` timestamps. `listen`, `echo`, `say` and `selftest` write a `session` line first, and `listen` and `echo` print the session's numbers when they exit. `stats` reads them back:
 

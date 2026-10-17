@@ -21,11 +21,10 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from ..stt_client import SAMPLE_RATE, read_wav, summarize_segments, to_float
+from ..stt_client import DEFAULT_PROMPT, SAMPLE_RATE, read_wav, summarize_segments, to_float
 
 logger = logging.getLogger("audio.stt_service")
 
-DEFAULT_PROMPT = "done, yes, no, stop, wait, cancel, repeat"
 BEAM_SIZE = 5
 MAX_SECONDS = 15
 MAX_BODY_BYTES = MAX_SECONDS * SAMPLE_RATE * 2 + 4096  # PCM16 mono plus header slack

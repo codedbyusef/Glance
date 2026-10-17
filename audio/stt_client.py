@@ -15,6 +15,9 @@ import numpy as np
 from .log import EventLog, null_log
 
 SAMPLE_RATE = 16000
+# The server's default initial prompt (section 9). Whisper sometimes "transcribes" noise as the prompt itself.
+DEFAULT_PROMPT = "done, yes, no, stop, wait, cancel, repeat"
+PROMPT_WORDS = frozenset(DEFAULT_PROMPT.replace(",", " ").split())
 
 
 @dataclass
@@ -22,7 +25,7 @@ class SttResult:
     text: str
     backend: str  # vultr | local | none
     ms: int
-    dropped_reason: str | None = None  # no_speech | empty | non_speech_tag | blocklist | stt_failed
+    dropped_reason: str | None = None  # no_speech | empty | non_speech_tag | blocklist | prompt_echo | stt_failed
 
 
 @dataclass
@@ -104,6 +107,13 @@ def _phrase_key(text: str) -> str:
     return re.sub(r"[^\w\s]", "", text.lower()).strip()
 
 
+def is_prompt_echo(text: str) -> bool:
+    """More than 2 words that all come from the prompt, or any prompt word 3+ times (decision 23)."""
+    words = _phrase_key(text).split()
+    counts = {w: words.count(w) for w in set(words) & PROMPT_WORDS}
+    return (len(words) > 2 and all(w in PROMPT_WORDS for w in words)) or any(n >= 3 for n in counts.values())
+
+
 def drop_reason(raw: RawTranscript, text: str, blocklist: list[str]) -> str | None:
     if raw.no_speech_prob > 0.6 and raw.avg_logprob < -1.0:
         return "no_speech"
@@ -114,6 +124,8 @@ def drop_reason(raw: RawTranscript, text: str, blocklist: list[str]) -> str | No
     # The whole utterance must be a blocklisted phrase; case and surrounding punctuation are ignored ("You.").
     if _phrase_key(text) in {_phrase_key(b) for b in blocklist}:
         return "blocklist"
+    if is_prompt_echo(text):
+        return "prompt_echo"
     return None
 
 

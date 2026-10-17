@@ -194,6 +194,13 @@ def tone(rate: int, freq: float = 660.0, dur_s: float = 0.15, amp: float = 0.12)
     return (amp * env * np.sin(2 * np.pi * freq * t)).astype(np.float32)
 
 
+# "thinking" is the agent's cue (section 5.1); "wake" is played by the Mic on a wake detection (decision 24).
+CUES = {
+    "thinking": tone,
+    "wake": lambda rate: tone(rate, freq=990.0, dur_s=0.09, amp=0.15),
+}
+
+
 # ------------------------------------------------------------------ player
 
 @dataclass(eq=False)
@@ -272,14 +279,14 @@ class Player:
             self._report(s.id, "interrupted")
 
     def cue(self, name: str) -> None:
-        if name != "thinking":
+        if name not in CUES:
             self.log.write("error", where="player.cue", error=f"unknown cue {name!r}")
             return
         with self._cond:
             if self._writing or self._queue or not self._device_ok:
                 self.log.write("cue", name=name, played=False)
                 return
-            self._cue = tone(self.output.rate)
+            self._cue = CUES[name](self.output.rate)
             self._cond.notify_all()
         self.log.write("cue", name=name, played=True)
 

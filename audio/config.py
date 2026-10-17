@@ -26,6 +26,7 @@ class Config:
     # wake_end_threshold, or wake_end_max_s, whichever comes first (decision 19).
     wake_end_threshold: float = 0.3
     wake_end_max_s: float = 1.0
+    wake_tone: bool = True  # short tone on a wake detection when nothing is playing (decision 24)
 
     # devices
     input_device: str | int | None = None  # None means the system default

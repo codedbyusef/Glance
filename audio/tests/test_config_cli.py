@@ -136,7 +136,7 @@ def test_log_stats_reads_the_acceptance_numbers():
         ev("utterance_delivered", 8.1, chars=0, reason="too_short", backend=None, latency_ms=10),
         ev("error", 9.0, where="capture"),
     ]
-    st = cli.log_stats(cli.last_session(events))
+    st = cli.log_stats(cli.pick_session(events))
     assert st["cmd"] == "echo"
     assert st["wakes"] == 1 and st["wakes_in_open_capture"] == 1
     assert st["speech_starts"] == {"wake": 1, "vad": 1, "ptt": 1}
@@ -156,6 +156,32 @@ def test_read_log_skips_broken_lines(tmp_path):
     f.write_text('{"event": "a", "mono": 1, "wall": 1}\n{"event": "b", "mo\n', encoding="utf-8")
     assert [e["event"] for e in cli.read_log(f)] == ["a"]
     assert cli.read_log(tmp_path / "missing.jsonl") == []
+
+
+def test_pick_session_defaults_to_last_listen_or_echo():
+    events = [ev("session", 0.0, cmd="listen", id="100000"), ev("wake", 1.0, score=0.9, state="wake"),
+              ev("session", 2.0, cmd="echo", id="110000"), ev("wake", 3.0, score=0.8, state="wake"),
+              ev("session", 4.0, cmd="selftest", id="120000"), ev("stt", 5.0, backend="local", ms=1)]
+    assert cli.pick_session(events)[0]["id"] == "110000"
+    assert cli.pick_session(events, "100000")[1]["score"] == 0.9
+    assert cli.pick_session(events, "all") == events
+    assert cli.pick_session(events, "999999") is None
+    assert cli.pick_session(events[4:]) is None  # only a selftest session
+    assert [(sid, cmd, len(e)) for sid, cmd, e in cli.split_sessions([ev("x", 0.0)] + events[:2])] == [
+        ("-", None, 1), ("100000", "listen", 2)]
+
+
+def test_stats_session_option(tmp_path, capsys):
+    f = tmp_path / "audio.jsonl"
+    f.write_text("\n".join(cli.json.dumps(e) for e in [
+        ev("session", 0.0, cmd="listen", id="100000"), ev("wake", 1.0, score=0.9, state="wake"),
+        ev("session", 2.0, cmd="selftest", id="120000")]), encoding="utf-8")
+    assert cli.main(["stats", "--file", str(f)]) == 0
+    assert "Session 100000: listen" in capsys.readouterr().out
+    assert cli.main(["stats", "--file", str(f), "--session", "120000"]) == 0
+    assert "Session 120000: selftest" in capsys.readouterr().out
+    assert cli.main(["stats", "--file", str(f), "--session", "nope"]) == 1
+    assert "120000   selftest" in capsys.readouterr().out
 
 
 def test_stats_command(tmp_path, capsys):
@@ -188,7 +214,7 @@ def selftest_player():
     return p
 
 
-def speech(seconds=3.0, amp=3000):
+def speech(seconds=3.0, amp=6000):
     return (np.sin(np.arange(int(seconds * 16000)) / 5) * amp).astype(np.int16)
 
 
@@ -204,6 +230,17 @@ def test_selftest_passes(monkeypatch):
     text = "\n".join(lines)
     assert "PASS  speaker: completed" in text and "PASS  mic" in text
     assert "PASS  stt local" in text and "get me the can" in text
+
+
+def test_selftest_warns_on_quiet_mic_and_empty_transcripts(monkeypatch):
+    monkeypatch.delenv("GLANCE_STT_URL", raising=False)
+    lines = []
+    code = cli.run_selftest(config.Config(), None, lambda s: speech(s, amp=1166),
+                            [FakeBackend("vultr", text=""), FakeBackend("local", text="  ")], out=lines.append)
+    text = "\n".join(lines)
+    assert "WARN  mic" in text and "speak louder or check the mic" in text
+    assert "WARN  stt vultr" in text and "WARN  stt local" in text and "transcript ''" in text
+    assert code == 1  # only because the speaker (no Player) failed
 
 
 def test_selftest_reports_failures(monkeypatch):
