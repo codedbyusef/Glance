@@ -5,8 +5,11 @@ while the glove guides the hand. Grounding DINO finds the target from the phrase
 it from frame to frame. Runs as a WebSocket server on a Vultr GPU instance; the laptop streams frames
 to it. Design: [CLAUDE.md](CLAUDE.md).
 
-**Status: written, not yet run.** No part of this has been executed against real models or a Vultr
-instance yet. The Vultr IPv4 is still unknown, so it lives in `.env` as a placeholder (see below).
+**Status: runs locally, not yet on Vultr or a live webcam.** Tested on a laptop RTX 3060 Ti (fp16) with
+still photos and a synthetic panning clip: Grounding DINO ~130 ms per call, SAM 2.1 tiny 40-60 ms per
+frame, ~65 ms round trip through the local server, ~1.2 GB GPU for both. Still to check: the real demo
+objects under venue light, a real hand covering the target, and Vultr latency. The Vultr IPv4 is still
+unknown, so it lives in `.env` as a placeholder (see below).
 
 ## How a reach works
 
@@ -33,6 +36,7 @@ takes a depth function when it exists; until then success = fingertip in the box
 | `session.py` | Reach session state machine, timers, end statuses, report for the agent. |
 | `server.py` | FastAPI `/ws` + `/health`; newest frame wins; optional `GLANCE_TOKEN`. |
 | `client.py` | Laptop client library + `--health` / live webcam check. |
+| `reach_api.py` | Synchronous `start/pause/resume/cancel` + result callback for the agent (see "Agent integration"). |
 | `boxes.py` | All box conversion and geometry, in one tested place. |
 | `fake.py` | Canned detector/tracker for tests and wiring checks (`GLANCE_FAKE_MODELS=1`). |
 | `config.yaml` | Model ids, thresholds, timers, frame size, Vultr ports. |
@@ -43,6 +47,35 @@ takes a depth function when it exists; until then success = fingertip in the box
 
 The layout differs from the one sketched in CLAUDE.md (`server/app.py`, `glance/vision/...`):
 everything is kept inside this folder, like `hand-detection/`.
+
+## Agent integration
+
+The agent's LLM never sees frames. It calls `reach(target, refer, say_first)`; the agent's controller
+then calls `haptic.start(target, refer)` and waits for one `haptic_result` (agent/CLAUDE.md sections 5
+and 10). `reach_api.ReachAPI` is that interface on this side:
+
+```python
+api = ReachAPI(on_result=handle, frame_source=camera.newest_bgr, on_progress=glove_controller)
+session_id = api.start("sheet of paper", "the white sheet on the desk")   # raises ReachStartError
+api.pause(session_id); api.resume(session_id); api.cancel(session_id)
+```
+
+- It streams the newest camera frame to the server at `reach_api.stream_fps` and returns one
+  `ReachResult` per reach, with the agent's `haptic_result` fields (status, inferred, elapsed_s,
+  target, last_seen, closest_approach, frame). `frame` is the JPEG the server ended on (None on success).
+- Link dead or server silent for `reach_api.no_reply_s` -> `stale_link`, made on this side.
+- `cancel` -> a `cancelled` result (the agent drops those). `pause` stops frames and freezes timers.
+- `on_result` and `on_progress` run on the API's own thread; hop to your loop with
+  `loop.call_soon_threadsafe`.
+- `on_progress` gets each per-frame `progress` message (target box, hand point, timings): the input
+  for the glove controller, which does not exist yet.
+
+Connecting it to the agent later is a small adapter in the agent (not written yet): `ReachStartError`
+-> `HapticStartError`, `ReachResult` -> `guide_agent.schemas.HapticResult` (same field names;
+`LastSeen` and `Frame` map one to one), and swap it in for `StubHaptic`. Share one camera thread
+between the agent's utterance frames and `frame_source`.
+
+Standalone check with the webcam (server running): `python object-detection/reach_api.py --target "sheet of paper"`.
 
 ## Vultr: what to do once the IPv4 is known
 
@@ -76,7 +109,7 @@ SAM 2 is too slow without a GPU.
 
 ## Tests
 
-`pytest object-detection -v` (fake models only; not run yet).
+`pytest object-detection -v` (fake models only; `test_reach_api.py` starts the server on a free local port).
 
 ## Things to check on the first real run
 

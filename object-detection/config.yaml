@@ -9,6 +9,13 @@ frame:
 camera:
   source: 0   # webcam index, or a video/stream URL
 
+# reach_api.py: the synchronous start/pause/resume/cancel API the agent calls.
+reach_api:
+  stream_fps: 15          # frames sent to the server per second during a reach
+  start_timeout_s: 3.0    # connect + `started` reply, else ReachStartError
+  no_reply_s: 2.0         # no message from the server for this long while running -> stale_link
+  keep_frames: 30         # recent JPEGs kept so the end report's frame_id comes back as a full frame
+
 # Where the vision server runs. The laptop client reads these.
 # The Vultr IPv4 is not known yet: leave host empty and set GLANCE_VULTR_HOST in
 # object-detection/.env once the instance exists (the deploy scripts read only .env).
