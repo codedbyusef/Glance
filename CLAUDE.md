@@ -136,9 +136,12 @@ Order of work: webcam + detector printing boxes, then SAM 2 + depth, then move t
 - Positive dx -> right channel; negative -> left. Positive dy (target lower in image) -> down; negative -> up. Target farther than hand -> forward.
 - Wrist channel = proximity, stronger as total distance shrinks.
 - Deadband per axis, hysteresis, EMA smoothing, and at most TWO direction channels active at once.
-- Success: hand point inside the target box at near depth for N consecutive frames -> confirm pulse + `success`.
-- Starting values (tune, not measured): deadband 0.05, hysteresis 0.03, EMA alpha 0.3, N = 5. Keep them in `config/controller.yaml`.
-- No hand in frame: zero all motors, then `hand_lost`. Tracker mask empty for several frames: re-detect once, else `target_lost`.
+- Success itself is decided server-side (see "Object detection and tracking (settled)" above): the controller
+  just drives motors from dx/dy/dz every frame; once the orchestrator gets a `success` `ReachReport`, it fires
+  the confirm pulse and stops.
+- Starting values (tune, not measured): deadband 0.05, hysteresis 0.03, EMA alpha 0.3. Keep them in `config/controller.yaml`.
+- No hand in frame: zero all motors. Tracker mask empty for several frames: re-detect once; the session's
+  own `hand_lost`/`target_lost` timeouts (config/settings.yaml: `reach_session`) are what actually end the reach.
 - No fine-tuned or learned policy. Rules only.
 - No hand-rotation compensation. The mapping is fixed in the camera's image frame; the user learns it.
 
@@ -198,7 +201,7 @@ glance/
 │   ├── controller.yaml          # deadband, hysteresis, EMA, N frames, max channels
 │   └── settings.yaml            # server URL, rates, thresholds, camera source
 ├── glance/                      # laptop-side Python package
-│   ├── schemas.py               # dataclasses: Plan, Step, Command, Event, FrameResult
+│   ├── schemas.py               # dataclasses: Plan, Step, ReachCommand, FrameResult, ReachReport
 │   ├── telemetry.py             # one JSON line per frame and per event
 │   ├── orchestrator/
 │   │   ├── state_machine.py     # idle, listening, planning, audio step, haptic step, replanning
@@ -210,7 +213,7 @@ glance/
 │   ├── vision/
 │   │   ├── camera.py            # frame source (webcam, phone stream)
 │   │   ├── client.py            # WebSocket client to the Vultr server
-│   │   ├── loop.py              # per-frame reach loop, emits events
+│   │   ├── loop.py              # sends frames, drives haptics per FrameResult, surfaces the ReachReport
 │   │   ├── controller.py        # error -> 8 values
 │   │   └── fake.py              # webcam-only / canned results, no server needed
 │   ├── haptics/
@@ -220,6 +223,8 @@ glance/
 │       └── reader.py            # scene 3
 ├── server/                      # runs on the Vultr GPU instance
 │   ├── app.py                   # FastAPI + WebSocket, /health endpoint
+│   ├── config.py                # tiny shared YAML loader (resolves config/ from repo root)
+│   ├── session.py               # ReachSession state machine: ACQUIRING -> TRACKING -> DONE
 │   ├── timing.py                # per-stage timers returned to the client
 │   └── models/
 │       ├── stt.py               # faster-whisper

@@ -11,15 +11,13 @@ one comes back; it's free to just take the top one when there's only one.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TypedDict
 
 import cv2
 import numpy as np
-import yaml
 from ultralytics import YOLOWorld
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
+from server import config
 
 
 class Candidate(TypedDict):
@@ -34,8 +32,7 @@ _confidence_threshold: float | None = None
 def _get_model() -> YOLOWorld:
     global _model, _confidence_threshold
     if _model is None:
-        with _CONFIG_PATH.open() as f:
-            settings = yaml.safe_load(f)["detector"]
+        settings = config.load("settings.yaml")["detector"]
         _model = YOLOWorld(settings["model_id"])
         _confidence_threshold = settings["confidence_threshold"]
     return _model
