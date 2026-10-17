@@ -1,0 +1,4 @@
+# Live-test logs and recordings stay local; copy the numbers you need into the write-up.
+logs/
+*.mp4
+benchmark_*.json
