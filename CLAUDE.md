@@ -275,3 +275,7 @@ Build:
 4. The default axis mode is `table` (paper or can on a desk, camera looking down).
 5. Motors are on or off. Proximity is the wrist's pulse rate.
 6. STT and vision servers run as separate processes with separate venvs.
+7. Step 0 layout: each top-level folder is its package (`guide_agent`, `audio`, `haptics`, `object_detection`, `hand_detection`, `depth_estimation`, `runtime`). `agent/` was flattened into `guide_agent/`, and its photo folder `fixtures/` is now `fixture_frames/`. Tests go in `<pkg>/tests/`, runnable tools in `<pkg>/scripts/` (`python -m <pkg>.scripts.<name>`). Everything runs from the repo root. `pyproject.toml` declares packages only.
+8. Requirements by machine role: `runtime/requirements.txt` (client: laptop and Pi, aarch64, no torch), `requirements-dev.txt` (unit tests), `object_detection/requirements-server.txt` (vision server, installed after the torch CUDA build, `opencv-contrib-python` only), and `audio/requirements-server[-windows].txt` (STT server, unchanged). Venvs: `.venv` (client), `.venv-vision` (vision server), `audio\.venv` (STT server on the GPU PC). `audio/scripts/install_pi.sh` keeps the openWakeWord `--no-deps` step.
+9. Hand-band tests draw the band in the middle of the configured HSV range, so they follow retuning. `hand_detection/config.yaml` keeps its tuned values.
+10. Depth convention: larger = farther (`depth_estimation`). `object_detection/CLAUDE.md` is a partly stale design doc; its README is current.
