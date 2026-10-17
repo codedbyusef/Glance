@@ -1,0 +1,114 @@
+{
+  "id": "stale_link_twice",
+  "category": "haptic_result",
+  "setup": {
+    "task": {
+      "goal": "get the red can",
+      "request": "get me the red can on the table",
+      "history": [
+        {
+          "type": "speak",
+          "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        },
+        {
+          "type": "speak",
+          "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        },
+        {
+          "type": "reach",
+          "target": "red soda can",
+          "refer": "the red can on the table",
+          "say_first": "Bring your right hand out in front of you, keep your head still, and follow the vibrations.",
+          "result": "stale_link"
+        }
+      ],
+      "notes": "Step 4: first reach stopped by a connection problem; retrying once. Remaining: reach, grasp.",
+      "current_step": {
+        "type": "reach",
+        "target": "red soda can",
+        "refer": "the red can on the table",
+        "say_first": "Bring your right hand out in front of you, keep your head still, and follow the vibrations.",
+        "state": "running",
+        "age_s": 9
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 60,
+        "role": "user",
+        "text": "get me the red can on the table"
+      },
+      {
+        "age_s": 58,
+        "role": "event",
+        "text": "task started: get the red can"
+      },
+      {
+        "age_s": 58,
+        "role": "assistant",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done."
+      },
+      {
+        "age_s": 30,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 28,
+        "role": "assistant",
+        "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done."
+      },
+      {
+        "age_s": 14,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 12,
+        "role": "assistant",
+        "text": "Bring your right hand out in front of you, keep your head still, and follow the vibrations."
+      },
+      {
+        "age_s": 9,
+        "role": "event",
+        "text": "reach started: red soda can"
+      },
+      {
+        "age_s": 8,
+        "role": "event",
+        "text": "haptic: stale_link"
+      },
+      {
+        "age_s": 7,
+        "role": "assistant",
+        "text": "Guidance stopped because of a connection problem. Let's try again. Bring your right hand out in front of you, keep your head still, and follow the vibrations."
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "haptic_result",
+        "status": "stale_link",
+        "closest_approach": "near",
+        "elapsed_s": 8.0,
+        "frame": "can_reach"
+      },
+      "expect": {
+        "terminal": [
+          "finish_task"
+        ],
+        "args": {
+          "outcome": {
+            "equals": "failed"
+          }
+        },
+        "judge": "Tells the user guidance stopped because of a connection problem and that it is ending the task."
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "no_frame",
+  "category": "question",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "what's in front of me",
+        "frame": null
+      },
+      "expect": {
+        "terminal": [
+          "plain"
+        ],
+        "start_task": false,
+        "judge": "Says the camera isn't available (or that it can't get an image right now) and makes no claims about what is in front of the user."
+      }
+    }
+  ]
+}

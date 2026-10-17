@@ -1,0 +1,102 @@
+{
+  "id": "halt",
+  "category": "during_task",
+  "setup": {
+    "task": {
+      "goal": "get the red can",
+      "request": "get me the red can on the table",
+      "history": [
+        {
+          "type": "speak",
+          "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        },
+        {
+          "type": "speak",
+          "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        }
+      ],
+      "notes": "Step 3: at the table, can within reach in front, slightly right. Remaining: reach, grasp.",
+      "current_step": {
+        "type": "reach",
+        "target": "red soda can",
+        "refer": "the red can on the table",
+        "say_first": "Bring your right hand out in front of you, keep your head still, and follow the vibrations.",
+        "state": "running",
+        "age_s": 9
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 60,
+        "role": "user",
+        "text": "get me the red can on the table"
+      },
+      {
+        "age_s": 58,
+        "role": "event",
+        "text": "task started: get the red can"
+      },
+      {
+        "age_s": 58,
+        "role": "assistant",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done."
+      },
+      {
+        "age_s": 30,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 28,
+        "role": "assistant",
+        "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done."
+      },
+      {
+        "age_s": 14,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 12,
+        "role": "assistant",
+        "text": "Bring your right hand out in front of you, keep your head still, and follow the vibrations."
+      },
+      {
+        "age_s": 9,
+        "role": "event",
+        "text": "reach started: red soda can"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "stop",
+        "frame": "can_reach"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "args": {
+          "expect": {
+            "equals": "answer"
+          }
+        },
+        "start_task": false,
+        "outputs": {
+          "order": [
+            "haptic.cancel",
+            "model"
+          ]
+        },
+        "judge": "Confirms that it stopped and asks whether the user wants to keep going."
+      }
+    }
+  ]
+}

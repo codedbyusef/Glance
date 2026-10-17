@@ -1,0 +1,34 @@
+{
+  "id": "start_reach",
+  "category": "task_start",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "get me the can",
+        "frame": "can_reach"
+      },
+      "expect": {
+        "terminal": [
+          "reach"
+        ],
+        "start_task": true,
+        "args": {
+          "target": {
+            "contains_any": [
+              "can"
+            ]
+          }
+        },
+        "spoken": {
+          "contains_all": [
+            "right hand"
+          ]
+        }
+      }
+    }
+  ]
+}

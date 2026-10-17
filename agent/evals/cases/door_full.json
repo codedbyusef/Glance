@@ -1,0 +1,91 @@
+{
+  "id": "door_full",
+  "category": "full_flow",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "open the door",
+        "frame": "door_far"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": true,
+        "args": {
+          "expect": {
+            "equals": "done"
+          }
+        }
+      }
+    },
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "done",
+        "frame": "door_handle_reach"
+      },
+      "expect": {
+        "terminal": [
+          "reach"
+        ],
+        "args": {
+          "target": {
+            "contains_any": [
+              "handle",
+              "door"
+            ]
+          }
+        },
+        "spoken": {
+          "contains_all": [
+            "right hand"
+          ]
+        }
+      }
+    },
+    {
+      "trigger": {
+        "type": "haptic_result",
+        "status": "success",
+        "closest_approach": "near",
+        "elapsed_s": 8.0
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "args": {
+          "expect": {
+            "equals": "answer"
+          }
+        },
+        "judge": "Checks by touch and gives the one final action to open the door, such as pressing the handle down and pushing or pulling."
+      }
+    },
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "yes",
+        "frame": "door_handle_reach"
+      },
+      "expect": {
+        "terminal": [
+          "finish_task"
+        ],
+        "args": {
+          "outcome": {
+            "equals": "success"
+          }
+        },
+        "state_after": {
+          "task": "none"
+        }
+      }
+    }
+  ]
+}

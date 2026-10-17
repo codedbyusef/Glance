@@ -1,0 +1,64 @@
+{
+  "id": "correction",
+  "category": "during_task",
+  "setup": {
+    "task": {
+      "goal": "get the can",
+      "request": "get me the can",
+      "history": [],
+      "notes": "Step 1: two cans within reach, red on the left, blue on the right. Asked which one.",
+      "current_step": {
+        "type": "speak",
+        "expect": "answer",
+        "state": "awaiting_reply",
+        "heard_fully": true,
+        "age_s": 6,
+        "text": "There are two cans within reach, a red one on your left and a blue one on your right. Do you want the red one?"
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 10,
+        "role": "user",
+        "text": "get me the can"
+      },
+      {
+        "age_s": 8,
+        "role": "event",
+        "text": "task started: get the can"
+      },
+      {
+        "age_s": 8,
+        "role": "assistant",
+        "text": "There are two cans within reach, a red one on your left and a blue one on your right. Do you want the red one?"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "no, the blue one",
+        "frame": "two_cans_reach"
+      },
+      "expect": {
+        "terminal": [
+          "speak",
+          "reach"
+        ],
+        "start_task": false,
+        "args": {
+          "refer": {
+            "contains_any": [
+              "blue"
+            ]
+          }
+        },
+        "state_after": {
+          "task": "active"
+        },
+        "judge": "Continues with the blue can, not the red one."
+      }
+    }
+  ]
+}

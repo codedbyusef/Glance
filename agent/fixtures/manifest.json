@@ -1,0 +1,31 @@
+{
+  "_note": "CLAUDE.md section 17.5. Phone photos of the real demo objects, landscape, no zoom, eye level. Within-reach photos are taken with the head tilted down so the object is near the middle, except can_reach_low. Put each photo next to this file under its 'file' name and set missing to false.",
+  "fixtures": [
+    {"id": "desk_scene", "file": "desk_scene.jpg", "missing": true,
+     "description": "A table with several everyday objects, about 2 m away"},
+    {"id": "sign_text", "file": "sign_text.jpg", "missing": true, "expected_text": null,
+     "description": "A printed sign with short known text, about 1.5 m away. Set expected_text to the exact printed words"},
+    {"id": "can_far", "file": "can_far.jpg", "missing": true,
+     "description": "A red can on a table, about 3 m ahead"},
+    {"id": "can_mid", "file": "can_mid.jpg", "missing": true,
+     "description": "The same red can on the table, about 1.5 m ahead"},
+    {"id": "can_reach", "file": "can_reach.jpg", "missing": true,
+     "description": "The same can within arm's reach, no hand in view"},
+    {"id": "can_reach_low", "file": "can_reach_low.jpg", "missing": true,
+     "description": "The can within reach, taken facing straight ahead so the can is at the bottom edge"},
+    {"id": "two_cans_reach", "file": "two_cans_reach.jpg", "missing": true,
+     "description": "A red can and a blue can side by side, within reach"},
+    {"id": "no_can", "file": "no_can.jpg", "missing": true,
+     "description": "The same area with no can"},
+    {"id": "can_hand_occluding", "file": "can_hand_occluding.jpg", "missing": true,
+     "description": "The gloved hand partly covering the can"},
+    {"id": "chair_in_path", "file": "chair_in_path.jpg", "missing": true,
+     "description": "A chair between the camera and the table with the can"},
+    {"id": "door_far", "file": "door_far.jpg", "missing": true,
+     "description": "A closed door about 3 m ahead"},
+    {"id": "door_handle_reach", "file": "door_handle_reach.jpg", "missing": true,
+     "description": "The door handle within arm's reach"},
+    {"id": "knife_reach", "file": "knife_reach.jpg", "missing": true,
+     "description": "A kitchen knife on a table within reach"}
+  ]
+}

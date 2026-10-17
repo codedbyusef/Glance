@@ -1,0 +1,30 @@
+{
+  "id": "read_text",
+  "category": "question",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "what does this say",
+        "frame": "sign_text"
+      },
+      "expect": {
+        "terminal": [
+          "plain"
+        ],
+        "start_task": false,
+        "spoken": {
+          "contains_all": [
+            "{fixture:sign_text}"
+          ]
+        }
+      }
+    }
+  ],
+  "global": {
+    "answer_max_words": false
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "knife",
+  "category": "task_start",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "help me pick up the knife",
+        "frame": "knife_reach"
+      },
+      "expect": {
+        "terminal": [
+          "reach"
+        ],
+        "start_task": true,
+        "args": {
+          "target": {
+            "contains_any": [
+              "knife"
+            ]
+          }
+        },
+        "spoken": {
+          "contains_any": [
+            "blade",
+            "sharp",
+            "edge"
+          ]
+        },
+        "judge": "Guides to the handle: the word 'handle' appears in refer or say_first. Warns about the blade or sharp edge."
+      }
+    }
+  ]
+}

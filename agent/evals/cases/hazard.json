@@ -1,0 +1,28 @@
+{
+  "id": "hazard",
+  "category": "task_start",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "get me the can",
+        "frame": "chair_in_path"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": true,
+        "spoken": {
+          "contains_any": [
+            "chair"
+          ]
+        },
+        "judge": "Mentions the chair in the same instruction as the movement, and the movement avoids it or proceeds carefully around it."
+      }
+    }
+  ]
+}

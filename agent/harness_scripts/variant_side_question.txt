@@ -1,0 +1,10 @@
+# 17.6 variant: a question during the reach pauses it, gets a plain answer, and the reach resumes
+/frame can_far
+get me the red can on the table
+/frame can_mid
+done
+/frame can_reach
+done
+what color is the can
+/haptic success
+yes

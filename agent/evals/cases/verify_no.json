@@ -1,0 +1,111 @@
+{
+  "id": "verify_no",
+  "category": "haptic_result",
+  "setup": {
+    "task": {
+      "goal": "get the red can",
+      "request": "get me the red can on the table",
+      "history": [
+        {
+          "type": "speak",
+          "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        },
+        {
+          "type": "speak",
+          "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        },
+        {
+          "type": "reach",
+          "target": "red soda can",
+          "refer": "the red can on the table",
+          "say_first": "Bring your right hand out in front of you, keep your head still, and follow the vibrations.",
+          "result": "success"
+        }
+      ],
+      "notes": "Step 4: reach succeeded. Remaining: confirm grasp.",
+      "current_step": {
+        "type": "speak",
+        "text": "Your hand should be on the can. Close your fingers around it and say yes if you have it.",
+        "expect": "answer",
+        "state": "awaiting_reply",
+        "heard_fully": true,
+        "age_s": 5
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 60,
+        "role": "user",
+        "text": "get me the red can on the table"
+      },
+      {
+        "age_s": 58,
+        "role": "event",
+        "text": "task started: get the red can"
+      },
+      {
+        "age_s": 58,
+        "role": "assistant",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done."
+      },
+      {
+        "age_s": 30,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 28,
+        "role": "assistant",
+        "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done."
+      },
+      {
+        "age_s": 14,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 12,
+        "role": "assistant",
+        "text": "Bring your right hand out in front of you, keep your head still, and follow the vibrations."
+      },
+      {
+        "age_s": 9,
+        "role": "event",
+        "text": "reach started: red soda can"
+      },
+      {
+        "age_s": 7,
+        "role": "event",
+        "text": "haptic: success"
+      },
+      {
+        "age_s": 6,
+        "role": "assistant",
+        "text": "Your hand should be on the can. Close your fingers around it and say yes if you have it."
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "no, it feels like a wall",
+        "frame": "can_reach"
+      },
+      "expect": {
+        "terminal": [
+          "speak",
+          "reach"
+        ],
+        "start_task": false,
+        "state_after": {
+          "task": "active"
+        }
+      }
+    }
+  ]
+}
