@@ -1,0 +1,6 @@
+# Windows/macOS/Linux dev laptop: everything the Pi runs, the STT server on CPU, and the tests.
+# Then: pip install --no-deps openwakeword==0.6.0
+-r requirements-pi.txt
+fastapi
+uvicorn[standard]
+pytest

@@ -1,0 +1,7 @@
+.venv/
+logs/
+clips/
+models/*
+!models/hey_glance.onnx
+!models/.gitkeep
+config.yaml
