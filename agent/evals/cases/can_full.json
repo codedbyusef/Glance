@@ -1,0 +1,107 @@
+{
+  "id": "can_full",
+  "category": "full_flow",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "get me the red can on the table",
+        "frame": "can_far"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": true,
+        "args": {
+          "expect": {
+            "equals": "done"
+          }
+        }
+      }
+    },
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "done",
+        "frame": "can_mid"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": false,
+        "args": {
+          "expect": {
+            "equals": "done"
+          }
+        }
+      }
+    },
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "done",
+        "frame": "can_reach"
+      },
+      "expect": {
+        "terminal": [
+          "reach"
+        ],
+        "args": {
+          "target": {
+            "contains_any": [
+              "can"
+            ]
+          }
+        },
+        "spoken": {
+          "contains_all": [
+            "right hand"
+          ]
+        }
+      }
+    },
+    {
+      "trigger": {
+        "type": "haptic_result",
+        "status": "success",
+        "closest_approach": "near",
+        "elapsed_s": 8.0
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "args": {
+          "expect": {
+            "equals": "answer"
+          }
+        }
+      }
+    },
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "yes",
+        "frame": "can_hand_occluding"
+      },
+      "expect": {
+        "terminal": [
+          "finish_task"
+        ],
+        "args": {
+          "outcome": {
+            "equals": "success"
+          }
+        },
+        "state_after": {
+          "task": "none"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "start_not_visible",
+  "category": "task_start",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "get me the can",
+        "frame": "no_can"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": true,
+        "judge": "Asks the user to turn by a bounded amount (for example a quarter turn to one side), then say done. Does not claim the can is in view."
+      }
+    }
+  ]
+}

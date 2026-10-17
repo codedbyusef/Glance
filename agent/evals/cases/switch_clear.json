@@ -1,0 +1,65 @@
+{
+  "id": "switch_clear",
+  "category": "during_task",
+  "setup": {
+    "task": {
+      "goal": "get the red can",
+      "request": "get me the red can on the table",
+      "history": [],
+      "notes": "Step 1: table about 4 steps ahead, slightly right; can on its right half. Remaining: walk to the table, reach, grasp.",
+      "current_step": {
+        "type": "speak",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done.",
+        "expect": "done",
+        "state": "awaiting_reply",
+        "heard_fully": true,
+        "age_s": 6
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 60,
+        "role": "user",
+        "text": "get me the red can on the table"
+      },
+      {
+        "age_s": 58,
+        "role": "event",
+        "text": "task started: get the red can"
+      },
+      {
+        "age_s": 58,
+        "role": "assistant",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done."
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "forget the can, find the door",
+        "frame": "door_far"
+      },
+      "expect": {
+        "terminal": [
+          "speak",
+          "reach"
+        ],
+        "start_task": {
+          "replace_active": {
+            "equals": true
+          }
+        },
+        "state_after": {
+          "task": "active",
+          "goal": {
+            "contains_any": [
+              "door"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

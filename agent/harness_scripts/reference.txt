@@ -1,0 +1,9 @@
+# CLAUDE.md 17.6 reference flow
+/frame can_far
+get me the red can on the table
+/frame can_mid
+done
+/frame can_reach
+done
+/haptic success
+yes

@@ -1,0 +1,68 @@
+{
+  "id": "drop_for_question",
+  "category": "during_task",
+  "setup": {
+    "task": {
+      "goal": "get the red can",
+      "request": "get me the red can on the table",
+      "history": [],
+      "notes": "Step 1: table about 4 steps ahead, slightly right; can on its right half. Remaining: walk to the table, reach, grasp.",
+      "current_step": {
+        "type": "speak",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done.",
+        "expect": "done",
+        "state": "awaiting_reply",
+        "heard_fully": true,
+        "age_s": 6
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 60,
+        "role": "user",
+        "text": "get me the red can on the table"
+      },
+      {
+        "age_s": 58,
+        "role": "event",
+        "text": "task started: get the red can"
+      },
+      {
+        "age_s": 58,
+        "role": "assistant",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done."
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "forget it, what does this sign say",
+        "frame": "sign_text"
+      },
+      "expect": {
+        "terminal": [
+          "finish_task"
+        ],
+        "start_task": false,
+        "args": {
+          "outcome": {
+            "equals": "cancelled"
+          }
+        },
+        "spoken": {
+          "contains_all": [
+            "{fixture:sign_text}"
+          ]
+        },
+        "state_after": {
+          "task": "none"
+        }
+      }
+    }
+  ],
+  "global": {
+    "answer_max_words": false
+  }
+}

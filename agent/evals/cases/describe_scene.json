@@ -1,0 +1,23 @@
+{
+  "id": "describe_scene",
+  "category": "question",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "what am I looking at",
+        "frame": "desk_scene"
+      },
+      "expect": {
+        "terminal": [
+          "plain"
+        ],
+        "start_task": false,
+        "judge": "Describes the main objects on the table in plain spoken sentences. Any positions are relative to the user (left, right, ahead, distance in steps). No visual-only references such as 'over there'."
+      }
+    }
+  ]
+}

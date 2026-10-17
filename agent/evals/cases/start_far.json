@@ -1,0 +1,33 @@
+{
+  "id": "start_far",
+  "category": "task_start",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "get me the can",
+        "frame": "can_far"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": true,
+        "args": {
+          "expect": {
+            "equals": "done"
+          }
+        },
+        "spoken": {
+          "contains_all": [
+            "say done"
+          ]
+        },
+        "judge": "Includes a short orientation (where the can or table is relative to the user, with an approximate distance) and asks the user to walk at most 3 steps."
+      }
+    }
+  ]
+}

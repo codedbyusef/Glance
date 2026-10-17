@@ -1,0 +1,28 @@
+{
+  "id": "start_ambiguous",
+  "category": "task_start",
+  "setup": {
+    "task": null
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "get me the can",
+        "frame": "two_cans_reach"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": true,
+        "args": {
+          "expect": {
+            "equals": "answer"
+          }
+        },
+        "judge": "Asks which can the user wants and tells the cans apart by color or position."
+      }
+    }
+  ]
+}

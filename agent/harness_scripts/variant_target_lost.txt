@@ -1,0 +1,11 @@
+# 17.6 variant: target_lost instead of success, pull the hand back, then a second reach
+/frame can_far
+get me the red can on the table
+/frame can_mid
+done
+/frame can_reach
+done
+/haptic target_lost region=right-middle depth=near closest=near
+done
+/haptic success
+yes

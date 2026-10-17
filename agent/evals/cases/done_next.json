@@ -1,0 +1,75 @@
+{
+  "id": "done_next",
+  "category": "task_flow",
+  "setup": {
+    "task": {
+      "goal": "get the red can",
+      "request": "get me the red can on the table",
+      "history": [
+        {
+          "type": "speak",
+          "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done.",
+          "expect": "done",
+          "result": "user: done"
+        }
+      ],
+      "notes": "Step 2: table about 2 steps ahead, can on its right half at waist height. Remaining: walk to the table, reach for the can, grasp.",
+      "current_step": {
+        "type": "speak",
+        "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done.",
+        "expect": "done",
+        "state": "awaiting_reply",
+        "heard_fully": true,
+        "age_s": 12
+      }
+    },
+    "recent_turns": [
+      {
+        "age_s": 60,
+        "role": "user",
+        "text": "get me the red can on the table"
+      },
+      {
+        "age_s": 58,
+        "role": "event",
+        "text": "task started: get the red can"
+      },
+      {
+        "age_s": 58,
+        "role": "assistant",
+        "text": "The can is on a table about four steps ahead, slightly to your right. Turn slightly right and take two steps forward, then say done."
+      },
+      {
+        "age_s": 30,
+        "role": "user",
+        "text": "done"
+      },
+      {
+        "age_s": 28,
+        "role": "assistant",
+        "text": "Hold your hands out at waist height and step forward slowly until you touch the table, about two steps, then say done."
+      }
+    ]
+  },
+  "steps": [
+    {
+      "trigger": {
+        "type": "user_utterance",
+        "text": "done",
+        "frame": "can_mid"
+      },
+      "expect": {
+        "terminal": [
+          "speak"
+        ],
+        "start_task": false,
+        "args": {
+          "expect": {
+            "equals": "done"
+          }
+        },
+        "judge": "Gives one small move closer to the table (at most 3 steps, ideally ending on contact with the table), ending with say done."
+      }
+    }
+  ]
+}
