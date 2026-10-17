@@ -2,7 +2,7 @@
 
 Loaded once per server process; runs only at reach() session start and on
 re-acquire -- SAM 2 (tracker.py) handles every-frame tracking after that.
-See CLAUDE.md "Object detection and tracking (settled)".
+See detection/CLAUDE.md "Object detection and tracking (settled)".
 
 Returns every candidate box sorted by confidence. The vision loop hands
 several candidates to the VLM disambiguator (using `refer`) when more than
@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLOWorld
 
-from server import config
+from shared import config
 
 
 class Candidate(TypedDict):

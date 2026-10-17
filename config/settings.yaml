@@ -12,7 +12,7 @@ detector:
   model_id: "yolov8m-worldv2.pt"  # swap for yolov8s-worldv2.pt (faster) or yolov8l-worldv2.pt (more accurate) after benchmarking
   confidence_threshold: 0.1
 
-# Reach session thresholds (CLAUDE.md "Object detection and tracking (settled)" -> End statuses).
+# Reach session thresholds (detection/CLAUDE.md "Object detection and tracking (settled)" -> End statuses).
 # Starting values -- tune, not measured.
 reach_session:
   resume_reacquire_after_s: 3.0

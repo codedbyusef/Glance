@@ -9,7 +9,7 @@ ema_alpha: 0.3
 max_active_channels: 2      # at most two direction channels active at once
 
 # Success itself is decided server-side now (settings.yaml: reach_session.success_hold_frames),
-# per the settled session contract in CLAUDE.md -- the controller just drives motors every
-# frame until the orchestrator gets a `success` ReachReport and fires the confirm pulse.
+# per the settled session contract in detection/CLAUDE.md -- the controller just drives motors
+# every frame until the runtime gets a `success` ReachReport and fires the confirm pulse.
 
 failsafe_timeout_ms: 300    # no packet for this long -> all motors off

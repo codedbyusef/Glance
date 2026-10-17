@@ -6,7 +6,7 @@ frame in flight, matching the server's drop-stale-frames contract.
 
 from __future__ import annotations
 
-from glance.schemas import FrameResult
+from shared.schemas import FrameResult
 
 
 class PerceptionClient:

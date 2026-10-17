@@ -4,7 +4,7 @@ can be built and tested before the Vultr perception server exists.
 
 from __future__ import annotations
 
-from glance.schemas import FrameResult
+from shared.schemas import FrameResult
 
 
 class FakePerceptionClient:

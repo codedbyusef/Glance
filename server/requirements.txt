@@ -1,0 +1,6 @@
+-r ../detection/requirements.txt
+-r ../hand/requirements.txt
+fastapi
+uvicorn[standard]
+faster-whisper
+pyyaml

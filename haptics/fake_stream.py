@@ -4,7 +4,7 @@ without waiting on vision or the perception server.
 
 from __future__ import annotations
 
-from glance.haptics.link import HapticLink
+from haptics.link import HapticLink
 
 
 def run_sweep(link: HapticLink) -> None:

@@ -8,12 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
-StepType = Literal["audio", "haptic", "read"]
-
-# Reach session contract, settled in CLAUDE.md "Object detection and tracking
-# (settled)". Supersedes the earlier start_reach/stop + step_done/user_stop
-# event sketch -- keep these names identical everywhere (planner prompt,
-# orchestrator, vision loop, server, logs).
+# Reach session contract, settled in detection/CLAUDE.md "Object detection and
+# tracking (settled)". Keep these names identical everywhere (agent, runtime
+# vision loop, server, logs).
 CommandType = Literal["start", "pause", "resume", "cancel"]
 EndStatus = Literal[
     "success",
@@ -26,21 +23,6 @@ EndStatus = Literal[
 ]
 DepthBand = Literal["near", "mid", "far"]
 Approach = Literal["touching", "near", "far"]
-
-
-@dataclass
-class Step:
-    type: StepType
-    text: Optional[str] = None            # for "audio"
-    action: Optional[str] = None          # for "haptic", always "reach"
-    target: Optional[str] = None          # for "haptic": 1-4 word noun phrase, no positions
-    refer: Optional[str] = None           # for "haptic": fuller description, for disambiguation only
-    region: Optional[str] = None          # for "read", e.g. "held_object"
-
-
-@dataclass
-class Plan:
-    steps: list[Step] = field(default_factory=list)
 
 
 @dataclass

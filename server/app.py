@@ -2,9 +2,9 @@
 
 Processes only the newest frame per client and drops stale ones -- never queue,
 a queue makes the glove lag the hand. Behind HTTPS with a token check in
-production; see CLAUDE.md "Perception server (WebSocket)".
+production; see detection/CLAUDE.md "Perception server (WebSocket)".
 
-Wire protocol for /ws (see CLAUDE.md "Object detection and tracking (settled)"):
+Wire protocol for /ws (see detection/CLAUDE.md "Object detection and tracking (settled)"):
   client -> server, text (JSON): {"cmd": "start", "target": "...", "refer": "..."}
                                   {"cmd": "pause" | "resume" | "cancel"}
   client -> server, binary:      struct(">Id", frame_id, client_ts) + JPEG bytes
@@ -27,9 +27,9 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket
 from starlette.websockets import WebSocketState
 
-from server import config
-from server.models import detector as detector_model
+from detection import detector as detector_model
 from server.session import ReachSession
+from shared import config
 
 _FRAME_HEADER = struct.Struct(">Id")  # frame_id: uint32, client_ts: float64
 

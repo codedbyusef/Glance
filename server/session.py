@@ -1,6 +1,6 @@
 """Per-reach session state machine: ACQUIRING -> TRACKING -> DONE.
 
-Owns the thresholds from CLAUDE.md "Object detection and tracking (settled)":
+Owns the thresholds from detection/CLAUDE.md "Object detection and tracking (settled)":
 when to call the detector vs. the tracker, and when a reach has ended and why.
 Thresholds live in config/settings.yaml (reach_session) and config/controller.yaml
 (the depth "near" band), not here.
@@ -13,13 +13,13 @@ import uuid
 from enum import Enum, auto
 from typing import Optional
 
-from glance.schemas import Approach, DepthBand, EndStatus, FrameResult, LastSeen, ReachReport
-from server import config
-from server.models import depth as depth_model
-from server.models import detector as detector_model
-from server.models import hand as hand_model
-from server.models import tracker as tracker_model
+from detection import depth as depth_model
+from detection import detector as detector_model
+from detection import tracker as tracker_model
+from hand import locate as hand_model
 from server.timing import timed
+from shared import config
+from shared.schemas import Approach, DepthBand, EndStatus, FrameResult, LastSeen, ReachReport
 
 
 class _Phase(Enum):
@@ -124,7 +124,7 @@ class ReachSession:
             hand_depth = depth_model.estimate_depth(frame, patch=hand_point) if hand_point is not None else None
 
         # "Overlap" is hand-point-inside-box, not area coverage -- hand.py only
-        # returns a point, not a box, so "covers over half the box" (CLAUDE.md)
+        # returns a point, not a box, so "covers over half the box" (detection/CLAUDE.md)
         # is approximated as in/out until hand pose gives us a bounding region.
         reference_box = box if box is not None else self.last_target_box
         in_box = _point_in_box(hand_point, reference_box)
@@ -208,7 +208,7 @@ def _depth_near(target_depth: Optional[float], hand_depth: Optional[float], band
 def _combined_error(box, hand_point, target_depth, hand_depth, frame_width, frame_height) -> Optional[float]:
     """Single scalar used only to track "has this reach stopped improving"
     for the `stalled` status -- not fed to the haptic controller, which does
-    its own dx/dy/dz in glance/vision/controller.py.
+    its own dx/dy/dz in haptics/controller.py.
     """
     if box is None or hand_point is None:
         return None

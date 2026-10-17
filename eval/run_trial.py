@@ -1,5 +1,5 @@
 """Runs one blindfolded trial (glove guidance or audio-only baseline) and writes
-a JSONL log to eval/logs/ via glance.telemetry.Telemetry.
+a JSONL log to eval/logs/ via shared.telemetry.Telemetry.
 """
 
 from __future__ import annotations
