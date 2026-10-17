@@ -8,6 +8,10 @@ server:
 camera:
   source: 0  # webcam index, or a phone-stream URL
 
+detector:
+  model_id: "yolov8m-worldv2.pt"  # swap for yolov8s-worldv2.pt (faster) or yolov8l-worldv2.pt (more accurate) after benchmarking
+  confidence_threshold: 0.1
+
 wake_word:
   phrase: "hey jarvis"
   vad_enabled: true
