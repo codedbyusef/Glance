@@ -141,6 +141,10 @@ python -m audio.cli listen --wav some.wav       # replay a 16 kHz mono recording
 python -m audio.cli echo                        # say each transcript back
 ```
 
+`ptt_only: true` in `config.yaml` (or `runtime.voice_agent --ptt-only`) is for running without headphones:
+no wake word and no open-state VAD, so the speaker can't trigger a capture. Push-to-talk still works in
+every state, and pressing it while speech plays is still a barge-in (decision 26).
+
 The wake model is `models/hey_glance.onnx`. If that file is missing, the `hey_jarvis` stand-in loads and the log says STAND-IN. If no model loads at all, push-to-talk still works.
 
 After a detection, the capture starts only when the wake phrase has ended: at the first 60 ms gap in the voice, when the score falls below `wake_end_threshold` (0.3), or after `wake_end_max_s` (1.0 s), whichever comes first. The wake model also runs during open-state captures; a detection there drops the audio up to the end of the phrase, so "hey glance, stop" arrives as "stop". A leading "hey glance" left in a transcript is stripped as a backup. Each detection plays a short tone (`wake_tone`, on by default) unless something is already playing; wait for it before the command.

@@ -36,7 +36,7 @@ relative to its own file), its tests in `<package>/tests/`, and its runnable too
 | `hand_detection/` | Green tape band tracker (the hand point) | `hand_detection/README.md` |
 | `depth_estimation/` | Depth Anything V2 Small + `DepthTracker` | `depth_estimation/README.md` |
 | `haptics/` | `GuidanceController` (pixels -> motor commands), glove link, wire protocol | `haptics/CLAUDE.md` |
-| `runtime/` | Integration glue (from Step 1). For now: the client requirements file | `CLAUDE.md` |
+| `runtime/` | Integration glue: camera hub, live view, glove output, `voice_agent.py` (Step 1) | `CLAUDE.md` |
 | `firmware/glove/` | ESP32 sketch | `haptics/CLAUDE.md` |
 
 ## Requirements by machine role
@@ -99,6 +99,10 @@ from `object_detection/Dockerfile` via `object_detection/deploy/`.
 $env:GLANCE_STT_URL = "http://100.112.104.87:8001"; $env:GLANCE_STT_TOKEN = "<token>"
 $env:GLANCE_VISION_URL = "ws://100.112.104.87:8000/ws"; $env:GLANCE_TOKEN = "<token>"
 
+.venv\Scripts\python -m runtime.voice_agent --ptt-only         # Step 1: voice + agent + camera, keyboard reach
+.venv\Scripts\python -m runtime.voice_agent                    # same with the wake word (needs headphones)
+.venv\Scripts\python -m runtime.voice_agent --typed            # type instead of talking; real TTS and camera
+.venv\Scripts\python -m runtime.latency                        # end of speech -> first audio, last session
 .venv\Scripts\python -m guide_agent.harness                     # agent, typed, stubbed I/O
 .venv\Scripts\python -m guide_agent.scripts.webcam_chat         # agent, typed, live camera
 .venv\Scripts\python -m guide_agent.evals.run --case halt --runs 1

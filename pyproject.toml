@@ -34,6 +34,7 @@ testpaths = [
     "object_detection/tests",
     "hand_detection/tests",
     "depth_estimation/tests",
+    "runtime/tests",
 ]
 pythonpath = ["."]
 asyncio_mode = "auto"

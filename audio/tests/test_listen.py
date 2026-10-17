@@ -296,6 +296,28 @@ def test_ptt_without_wake_model():
     assert [type(a) for a in f.actions] == [SpeechStart, Finish]
 
 
+@pytest.mark.parametrize("wake", [True, False])
+def test_ptt_only_ignores_wake_word_and_speech(wake):
+    l, det = make_listener(wake=wake, scores=[0.9] * 40, cfg=Config(ptt_only=True))
+    acts = Feeder(l).feed(blocks(("q", 5), ("l", 20), ("q", 15)))
+    assert acts == []
+    assert l.state() == "ptt"
+    assert det.blocks == 0  # the wake model is not run at all
+
+
+def test_ptt_only_press_and_release_is_one_utterance():
+    l, _ = make_listener(wake=False, scores=[0.9] * 40, cfg=Config(ptt_only=True))
+    f = Feeder(l)
+    f.feed(blocks(("q", 10)))
+    f.ptt(True)
+    assert l.state() == "capture"
+    f.feed(blocks(("l", 10), ("q", 15)))  # silence doesn't end it, and no wake detection cuts it
+    f.ptt(False)
+    start, fin = f.actions
+    assert start.source == "ptt" and fin.reason == "ptt" and fin.audio is not None
+    assert l.state() == "ptt"
+
+
 def test_ptt_during_vad_capture_takes_over_without_second_start():
     l, _ = make_listener()
     f = Feeder(l)
@@ -570,6 +592,15 @@ def test_ptt_through_the_mic():
     mic, sink, _, _ = make_mic(wake=True)
     push(mic, blocks(("q", 3), ("l", 10), ("q", 3)), ptt={3: True, 15: False})
     assert sink.names() == ["speech_start", "utterance"]
+
+
+def test_ptt_only_through_the_mic_pairs_and_ignores_voice():
+    mic, sink, dispatch, _ = make_mic(wake=False, scores=[0.9] * 60, cfg=Config(ptt_only=True))
+    push(mic, blocks(("l", 20), ("q", 15)))  # talking (or a speaker) without the key: nothing
+    assert sink.names() == []
+    push(mic, blocks(("q", 3), ("l", 10), ("q", 3)), t0=1010.0, ptt={3: True, 15: False})
+    assert sink.names() == ["speech_start", "utterance"]
+    assert set(dispatch.calls) == {"on_speech_start", "on_utterance"}
 
 
 def test_threaded_mic_with_fake_capture_and_flush():

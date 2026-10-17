@@ -1,0 +1,13 @@
+# Runtime (client) settings. Paths are relative to the repo root.
+
+camera:
+  source: 1            # webcam index (1 = the Logitech Brio on the laptop, 0 = the built-in webcam), or a video path/URL
+  width: 1280
+  height: 720
+  dshow: true          # Windows: open webcams with CAP_DSHOW (faster to open, honors the size)
+  warmup_frames: 45    # the first frames come out dark while auto-exposure settles
+  jpeg_quality: 85     # agent frames; their long edge is capped by guide_agent's frame_max_long_edge_px
+
+view:
+  web_port: 8090       # --view web: MJPEG at http://<host>:8090/
+  width: 960           # displayed width of the live view (the camera frame is scaled to it)

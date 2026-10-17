@@ -35,6 +35,9 @@ class Config:
 
     wake_model: str = "models/hey_glance.onnx"  # path, or a pretrained openWakeWord name such as hey_jarvis
     ptt: str = "none"  # none | key | gpio:<pin>
+    # Push-to-talk only (no headphones): no wake word and no open-state VAD, so speaker output can't trigger
+    # a capture. Push-to-talk works as usual, and pressing it while speech plays is still a barge-in.
+    ptt_only: bool = False
     assistant_name: str = "Glance"
 
     # STT client (section 10)
