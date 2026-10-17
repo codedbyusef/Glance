@@ -1,0 +1,9 @@
+# STT service on a native Windows PC with an NVIDIA GPU (the stand-in for Vultr, decision 17).
+# The server adds the nvidia/*/bin DLL folders with os.add_dll_directory before importing faster_whisper.
+faster-whisper
+fastapi
+uvicorn[standard]
+httpx
+numpy
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*

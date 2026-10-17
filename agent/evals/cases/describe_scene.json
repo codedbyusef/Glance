@@ -16,7 +16,7 @@
           "plain"
         ],
         "start_task": false,
-        "judge": "Describes the main objects on the table in plain spoken sentences. Any positions are relative to the user (left, right, ahead, distance in steps). No visual-only references such as 'over there'."
+        "judge": "Describes what a blind user can act on: the main objects (and any obstacles or people) with positions relative to the user (left, right, ahead, distance in steps). Does not spend words on appearance details such as materials, textures, finishes, decor or lighting. No visual-only references such as 'over there'."
       }
     }
   ]
