@@ -1,0 +1,33 @@
+# Channel order: [thumb, index, middle, ring, pinky, top_of_hand, bottom_of_hand, wrist] (indices 0-7)
+# Cue-to-channel mapping is PROVISIONAL. Decide A vs B after the first blindfolded tester.
+channel_order:
+  - thumb
+  - index
+  - middle
+  - ring
+  - pinky
+  - top_of_hand
+  - bottom_of_hand
+  - wrist
+
+active_mapping: a  # "a" or "b"
+
+mappings:
+  a:
+    left: thumb
+    right: pinky
+    forward: index
+    back: ring
+    up: top_of_hand
+    down: bottom_of_hand
+    proximity: wrist
+    confirm: middle  # short double pulse
+  b:
+    left: index
+    right: pinky
+    forward: middle
+    back: ring
+    up: top_of_hand
+    down: bottom_of_hand
+    proximity: wrist
+    confirm: thumb  # short double pulse

@@ -1,0 +1,12 @@
+# Guidance controller tuning. Starting values are proposals, not measured facts.
+deadband:
+  dx: 0.05
+  dy: 0.05
+  dz: 0.05
+
+hysteresis: 0.03
+ema_alpha: 0.3
+success_frames: 5          # N consecutive frames inside target box at near depth -> step_done
+max_active_channels: 2      # at most two direction channels active at once
+
+failsafe_timeout_ms: 300    # no packet for this long -> all motors off

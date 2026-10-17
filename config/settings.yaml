@@ -1,0 +1,21 @@
+# Server + client wiring. Fill in once the Vultr instance and camera source are decided.
+server:
+  url: "ws://localhost:8000/ws"   # tunnel to Vultr: ssh -L 8000:localhost:8000 ...
+  frame_width: 640
+  frame_height: 480
+  jpeg_quality: 70
+
+camera:
+  source: 0  # webcam index, or a phone-stream URL
+
+wake_word:
+  phrase: "hey jarvis"
+  vad_enabled: true
+  push_to_talk_fallback: true
+
+haptics:
+  transport: "ble"  # "ble" or "wifi" -- undecided
+  rate_hz: 20
+
+latency:
+  target_ms: 300  # starting proposal, not a measured fact

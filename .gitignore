@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# eval logs are regenerated per trial; keep the directory, not the data
+eval/logs/*
+!eval/logs/.gitkeep
+
+.DS_Store
+*.env
+.env

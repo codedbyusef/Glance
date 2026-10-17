@@ -1,0 +1,19 @@
+# Laptop side
+openwakeword
+sounddevice
+numpy
+opencv-python
+websockets
+pyyaml
+requests
+
+# Server side (Vultr GPU instance)
+fastapi
+uvicorn[standard]
+faster-whisper
+transformers
+torch
+mediapipe
+
+# Eval
+pandas
