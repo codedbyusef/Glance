@@ -7,7 +7,7 @@ import pytest
 from audio.capture import FakeCapture
 from audio.config import Config
 from audio.events import RecordingSink
-from audio.listen import Finish, Listener, Mic, ReplyWindow, SpeechStart
+from audio.listen import Finish, Listener, Mic, ReplyWindow, SpeechStart, strip_wake_phrase, wake_phrase_pattern
 from audio.log import null_log
 from audio.stt_client import SttResult
 from audio.vad import FakeVad
@@ -16,6 +16,7 @@ from audio.wake import FakeDetector
 LOUD = np.full(1280, 3000, np.int16)
 QUIET = np.zeros(1280, np.int16)
 B = 0.08
+SHORT_START = Config(speech_start_ms=200)  # at the default 300 ms, a burst under 250 ms can't start speech at all
 
 
 def blocks(*parts):
@@ -91,6 +92,131 @@ def test_wake_detection_starts_capture_without_preroll():
     assert det.blocks == 6 + 24
 
 
+def clip_s(fin):
+    return len(fin.audio) / 16000
+
+
+def test_wake_waits_for_score_to_fall_when_speech_runs_on():
+    # "hey glance get me the can" in one breath: no gap, so capture starts when the score falls below 0.3
+    l, _ = make_listener(wake=True, scores=[0.1] * 5 + [0.6, 0.98, 1.0, 0.25])
+    f = Feeder(l)
+    f.feed(blocks(("l", 6)))
+    detected = f.t
+    assert [type(a) for a in f.actions] == [SpeechStart] and f.actions[0].at == pytest.approx(detected)
+    f.feed(blocks(("l", 3)))  # the wake phrase tail; the score falls on the last of these blocks
+    edge = f.t
+    f.feed(blocks(("l", 10), ("q", 12)))
+    fin = f.actions[-1]
+    assert fin.reason == "end" and fin.ended_at == pytest.approx(edge + 0.8)
+    assert clip_s(fin) == pytest.approx(0.8 + 0.2, abs=0.02)  # only the audio after the edge, plus the tail
+
+
+def test_wake_gap_ends_the_phrase_before_the_score_falls():
+    # the score lags: it stays high while the phrase's tail and the pause go by, but the first 60 ms gap ends it
+    l, _ = make_listener(wake=True, scores=[0.1] * 5 + [0.6] + [0.99] * 12)
+    f = Feeder(l)
+    f.feed(blocks(("l", 6), ("l", 2)))  # detection, then 160 ms of the phrase's tail
+    gap_start = f.t
+    f.feed(blocks(("q", 6), ("l", 10), ("q", 12)))
+    start, fin = f.actions
+    assert fin.reason == "end"
+    assert clip_s(fin) == pytest.approx(0.48 + 0.8 + 0.2, abs=0.02)  # from the gap: no tail of the wake phrase
+    assert fin.ended_at == pytest.approx(gap_start + 0.48 + 0.8)
+
+
+def test_wake_then_pause_waits_from_end_of_phrase():
+    # "hey glance" ... pause: the tail plus silence must not end the capture; the no-speech window starts at the gap
+    l, _ = make_listener(wake=True, scores=[0.1] * 5 + [0.6, 0.98, 1.0, 0.9, 0.5, 0.2])
+    f = Feeder(l)
+    f.feed(blocks(("l", 6), ("l", 3)))
+    gap_start = f.t
+    f.feed(blocks(("q", 30)))  # 2.4 s pause
+    assert [type(a) for a in f.actions] == [SpeechStart]
+    f.feed(blocks(("l", 10), ("q", 12)))
+    fin = f.actions[-1]
+    assert fin.reason == "end" and fin.audio is not None
+
+    l, _ = make_listener(wake=True, scores=[0.1] * 5 + [0.6, 0.98, 1.0])
+    f = Feeder(l)
+    f.feed(blocks(("l", 6), ("l", 3)))
+    gap_start = f.t
+    f.feed(blocks(("q", 60)))
+    fin = f.actions[-1]
+    assert fin.reason == "no_speech" and fin.ended_at == pytest.approx(gap_start + 4.0, abs=0.03)
+
+
+def test_wake_wait_is_capped():
+    l, _ = make_listener(wake=True, scores=[0.1] * 5 + [0.6] + [0.99] * 13)  # falls after the cap
+    f = Feeder(l)
+    f.feed(blocks(("l", 6)))
+    detected = f.t
+    f.feed(blocks(("l", 20), ("q", 12)))  # no gap and the score never falls
+    fin = f.actions[-1]
+    assert fin.reason == "end"
+    assert clip_s(fin) == pytest.approx(20 * B - 1.04 + 0.2, abs=0.02)  # starts at the first block end past 1.0 s
+    assert fin.ended_at == pytest.approx(detected + 20 * B)
+
+
+def test_wake_inside_open_capture_drops_the_wake_phrase():
+    # open state: "hey glance" starts a VAD capture, the detection drops it, and "stop" is what's left
+    l, _ = make_listener(wake=False, scores=[0.0] * 10 + [0.9] + [0.95] * 10)
+    f = Feeder(l)
+    f.feed(blocks(("q", 5), ("l", 6)))  # VAD start, then the detection on the 6th loud block
+    f.feed(blocks(("q", 2)))
+    stop_t = f.t
+    f.feed(blocks(("l", 5), ("q", 12)))
+    assert [type(a) for a in f.actions] == [SpeechStart, Finish]  # still one speech_start
+    start, fin = f.actions
+    assert start.source == "vad"
+    assert fin.reason == "end" and fin.ended_at == pytest.approx(stop_t + 0.4)
+    assert clip_s(fin) == pytest.approx(0.16 + 0.4 + 0.2, abs=0.02)
+
+
+def test_wake_in_open_state_before_vad_start_starts_a_wake_capture():
+    l, _ = make_listener(wake=False, scores=[0.0] * 5 + [0.9])
+    f = Feeder(l)
+    f.feed(blocks(("q", 5), ("q", 1)))
+    assert [(type(a), a.source) for a in f.actions] == [(SpeechStart, "wake")]
+
+
+def test_ptt_during_wake_wait_takes_over():
+    l, _ = make_listener(wake=True, scores=[0.9] + [0.99] * 10)
+    f = Feeder(l)
+    f.feed(blocks(("l", 2)))
+    f.ptt(True)
+    f.feed(blocks(("l", 5), ("q", 20)))
+    f.ptt(False)
+    assert [type(a) for a in f.actions] == [SpeechStart, Finish]
+    assert f.actions[1].reason == "ptt" and f.actions[1].audio is not None
+
+
+def test_wake_ignored_during_ptt_capture():
+    l, _ = make_listener(wake=True, scores=[0.0, 0.9, 0.9])
+    f = Feeder(l)
+    f.ptt(True)
+    f.feed(blocks(("l", 8)))
+    f.ptt(False)
+    assert [type(a) for a in f.actions] == [SpeechStart, Finish]
+    assert clip_s(f.actions[1]) == pytest.approx(8 * B, abs=0.02)  # nothing dropped
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("hey glance, stop", "stop"),
+    ("Hey, Glance. Stop.", "Stop."),
+    ("Hey Glance, get me the can.", "get me the can."),
+    ("Glance, what is this?", "what is this?"),
+    ("hey glance", ""),
+    ("Hey, Glance.", ""),
+    ("Glance", ""),
+    ("what is on the desk", "what is on the desk"),
+    ("hey there", "hey there"),
+    ("Glancey said hi", "Glancey said hi"),
+    ("stop, hey glance", "stop, hey glance"),
+])
+def test_strip_wake_phrase(text, expected):
+    assert strip_wake_phrase(text, wake_phrase_pattern("Glance")) == expected
+
+
 def test_wake_below_threshold_does_nothing():
     l, _ = make_listener(wake=True, scores=[0.49] * 10)
     assert Feeder(l).feed(blocks(("l", 10))) == []
@@ -123,7 +249,7 @@ def test_no_speech_after_wake_delivers_empty():
 
 
 def test_too_short_burst_delivers_empty_after_waiting():
-    l, _ = make_listener()
+    l, _ = make_listener(cfg=SHORT_START)
     f = Feeder(l)
     f.feed(blocks(("q", 5), ("l", 3), ("q", 70)))  # 240 ms of speech < 250 ms
     start, fin = f.actions
@@ -131,7 +257,7 @@ def test_too_short_burst_delivers_empty_after_waiting():
 
 
 def test_short_burst_then_speech_is_one_utterance():
-    l, _ = make_listener()
+    l, _ = make_listener(cfg=SHORT_START)
     f = Feeder(l)
     f.feed(blocks(("q", 5), ("l", 3), ("q", 15), ("l", 8), ("q", 12)))
     assert [type(a) for a in f.actions] == [SpeechStart, Finish]
@@ -267,7 +393,7 @@ class RecordingDispatch:
         fn(*args)
 
 
-def make_mic(transcriber=None, player=None, scores=None, wake=False, frame_source=None, order=None):
+def make_mic(transcriber=None, player=None, scores=None, wake=False, frame_source=None, order=None, cfg=None):
     """wake: True or False forces the policy; "real" uses section 6 with the fake player."""
     sink = RecordingSink()
     dispatch = RecordingDispatch()
@@ -277,7 +403,7 @@ def make_mic(transcriber=None, player=None, scores=None, wake=False, frame_sourc
         order.append("frame")
         return {"id": "f1"}
 
-    mic = Mic(Config(), sink, transcriber or FakeTranscriber(order=order), FakeCapture([]), FakeVad(),
+    mic = Mic(cfg or Config(), sink, transcriber or FakeTranscriber(order=order), FakeCapture([]), FakeVad(),
               detector=FakeDetector(scores), player=player or FakePlayer(), dispatch=dispatch,
               frame_source=frame_source or frames, log=null_log())
     if wake != "real":
@@ -312,11 +438,20 @@ def test_vad_utterance_end_to_end():
     assert dispatch.calls == ["on_speech_start", "on_utterance"]
 
 
+def test_log_carries_speech_start_time_and_backend():
+    mic, sink, _, _ = make_mic()
+    push(mic, blocks(("q", 5), ("l", 10), ("q", 12)))
+    start, = mic.log.of("speech_start")
+    assert start["at"] == pytest.approx(sink.calls[0].args[0], abs=1e-3)
+    delivered, = mic.log.of("utterance_delivered")
+    assert delivered["backend"] == "vultr" and delivered["chars"] == 5
+
+
 def test_every_start_gets_one_utterance_in_all_empty_cases():
     order = []
     tr = FakeTranscriber(results=[SttResult("", "none", 5, "stt_failed"), SttResult("", "vultr", 5, "blocklist")],
                          order=order)
-    mic, sink, dispatch, _ = make_mic(transcriber=tr, scores=[0.9], wake=True, order=order)
+    mic, sink, dispatch, _ = make_mic(transcriber=tr, scores=[0.9], wake=True, order=order, cfg=SHORT_START)
     t = push(mic, blocks(("q", 60)))  # wake, then no speech
     mic.wake_needed = lambda: False
     t = push(mic, blocks(("q", 5), ("l", 3), ("q", 70)), t0=t)  # too short
@@ -373,14 +508,22 @@ def test_worker_exception_recovers_and_keeps_pairing():
 
 def test_reply_window_closes_on_delivered_text_but_not_on_name():
     player = FakePlayer()
-    tr = FakeTranscriber(results=[SttResult("Hey, Glance.", "vultr", 5), SttResult("yes", "vultr", 5)])
+    tr = FakeTranscriber(results=[SttResult("Glance", "vultr", 5), SttResult("yes", "vultr", 5)])
     mic, sink, _, _ = make_mic(transcriber=tr, player=player, wake="real")
     player.window.on_say("answer")
     t = push(mic, blocks(("q", 5), ("l", 10), ("q", 12)))
     assert player.window.is_open
     push(mic, blocks(("q", 5), ("l", 10), ("q", 12)), t0=t)
     assert not player.window.is_open
-    assert sink.utterances() == ["Hey, Glance.", "yes"]
+    assert sink.utterances() == ["", "yes"]  # the wake phrase alone is stripped to nothing
+
+
+def test_hey_glance_stop_in_open_state_arrives_as_stop():
+    tr = FakeTranscriber(results=[SttResult("hey glance, stop", "vultr", 5)])
+    mic, sink, _, _ = make_mic(transcriber=tr, scores=[0.0] * 10 + [0.9] + [0.95] * 10, wake=False)
+    push(mic, blocks(("q", 5), ("l", 6), ("q", 2), ("l", 5), ("q", 12)))
+    assert sink.utterances() == ["stop"]
+    assert_paired(sink)
 
 
 def test_empty_utterance_keeps_reply_window_open():

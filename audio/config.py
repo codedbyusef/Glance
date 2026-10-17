@@ -12,8 +12,8 @@ DEFAULT_CONFIG_PATH = AUDIO_DIR / "config.yaml"
 @dataclass
 class Config:
     # endpointing and wake word (section 7)
-    vad_aggressiveness: int = 2
-    speech_start_ms: int = 200
+    vad_aggressiveness: int = 3  # decision 20
+    speech_start_ms: int = 300
     end_silence_ms: int = 700
     preroll_ms: int = 300
     min_utterance_ms: int = 250
@@ -22,6 +22,10 @@ class Config:
     wake_threshold: float = 0.5
     wake_vad_threshold: float = 0.5
     wake_cooldown_s: float = 1.5
+    # After a detection, capture starts when the wake phrase ends: a 60 ms unvoiced gap, the score falling below
+    # wake_end_threshold, or wake_end_max_s, whichever comes first (decision 19).
+    wake_end_threshold: float = 0.3
+    wake_end_max_s: float = 1.0
 
     # devices
     input_device: str | int | None = None  # None means the system default

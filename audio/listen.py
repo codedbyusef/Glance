@@ -1,4 +1,4 @@
-"""Listening policy and the Mic (CLAUDE.md sections 5.2, 5.3, 6 and 7; decisions 3, 6, 11 and 13).
+"""Listening policy and the Mic (CLAUDE.md sections 5.2, 5.3, 6 and 7; decisions 3, 6, 11, 13 and 19).
 
 Listener is the pure state machine: it takes audio blocks and push-to-talk events with timestamps and returns
 actions. Mic wires it to the capture source, the wake detector, STT, the frame source and the sink, on one worker
@@ -23,6 +23,18 @@ from .vad import FRAME_S, START_WINDOW_S, Endpointer, StartDetector, VadClassifi
 EXPECTS = ("none", "done", "answer")
 BLOCK_S = 0.08
 TAIL_S = 0.2  # audio kept after the last voiced frame, so the last syllable isn't clipped
+WAKE_GAP_FRAMES = 3  # 60 ms of unvoiced audio after a detection: the wake phrase has ended (decision 19)
+
+
+def wake_phrase_pattern(assistant_name: str) -> re.Pattern:
+    """A leading "hey glance" / "Hey, Glance." / "glance" plus the punctuation and space after it (decision 19)."""
+    words = re.sub(r"[^\w\s]", " ", assistant_name.lower()).split()
+    name = r"\W+".join(map(re.escape, words))
+    return re.compile(rf"^\W*(?:hey\W+)?{name}\b\W*", re.IGNORECASE)
+
+
+def strip_wake_phrase(text: str, pattern: re.Pattern) -> str:
+    return pattern.sub("", text, count=1)
 
 
 class ReplyWindow:
@@ -78,7 +90,10 @@ class _Capture:
     source: str
     start_t: float
     chunks: list = field(default_factory=list)  # (frame, t)
-    endpointer: Endpointer | None = None  # None for push-to-talk
+    endpointer: Endpointer | None = None  # None for push-to-talk, and while waiting out the wake phrase
+    # Set (to the detection time) while the wake phrase is still being spoken: audio until it ends is dropped.
+    wake_wait: float | None = None
+    gap: list = field(default_factory=list)  # the current run of unvoiced frames while waiting
 
 
 class Listener:
@@ -119,42 +134,82 @@ class Listener:
         actions: list = []
         state = self.state()
         self._note_state(state)
-        woke = False
+        score = None
         if self.detector is not None:
-            score = self.detector.score(block)  # fed in every state, so its features stay current
+            score = self.detector.score(block)  # fed in every state: detections also trim open-state captures
             if self.score_hook is not None:
                 self.score_hook(score, t)
-            if (state == "wake" and score >= self.cfg.wake_threshold
-                    and t - self.last_wake >= self.cfg.wake_cooldown_s):
-                self.last_wake = t
-                at = t + BLOCK_S
-                self.log.write("wake", score=round(score, 3), model=getattr(self.detector, "name", None))
-                self.log.write("speech_start", source="wake")
-                # No pre-roll: capture starts after this block, so the wake phrase stays out of the clip.
-                self.capture = _Capture("wake", at, endpointer=Endpointer(self.cfg, at))
-                actions.append(SpeechStart(at, "wake"))
-                woke = True
+            self._detect(score, t, state, actions)
         for i, frame in enumerate(frames(block)):
             ft = t + i * FRAME_S
             voiced = self.vad.is_speech(frame)
             self.ring.append((frame, ft))
             start = self.start_detector.push(voiced, ft)
-            if woke:
-                continue
             cap = self.capture
             if cap is not None:
+                if cap.wake_wait is not None:
+                    self._wait_frame(cap, frame, voiced, ft)
+                    continue
                 cap.chunks.append((frame, ft))
                 done = self._capture_frame(cap, voiced, ft)
                 if done is not None:
                     actions.append(done)
                     return actions  # the rest of the block is discarded with the audio during STT
             elif state == "open" and start is not None:
-                self.log.write("speech_start", source="vad")
+                self.log.write("speech_start", source="vad", at=round(start, 4))
                 ep = Endpointer(self.cfg, start, first_voiced=start, last_voiced_end=ft + FRAME_S)
                 chunks = [(f, ftt) for f, ftt in self.ring if ftt >= start - self.cfg.preroll_ms / 1000 - 1e-9]
                 self.capture = _Capture("vad", start, chunks, ep)
                 actions.append(SpeechStart(start, "vad"))
+        cap = self.capture
+        if cap is not None and cap.wake_wait is not None and score is not None:
+            end = t + BLOCK_S
+            if score < self.cfg.wake_end_threshold:
+                self._end_wake_wait(cap, end, [], "score")
+            elif end - cap.wake_wait >= self.cfg.wake_end_max_s - 1e-9:
+                self._end_wake_wait(cap, end, [], "max")
         return actions
+
+    # ---------------------------------------------------------------- wake phrase
+
+    def _detect(self, score: float, t: float, state: str, actions: list) -> None:
+        cap = self.capture
+        if (score < self.cfg.wake_threshold or t - self.last_wake < self.cfg.wake_cooldown_s
+                or (cap is not None and (cap.source == "ptt" or cap.wake_wait is not None))):
+            return
+        self.last_wake = t
+        at = t + BLOCK_S
+        self.log.write("wake", score=round(score, 3), model=getattr(self.detector, "name", None),
+                       state=state, during=cap.source if cap is not None else None)
+        if cap is None:
+            self.log.write("speech_start", source="wake", at=round(at, 4))
+            # No pre-roll, and nothing is kept until the wake phrase has ended, so it stays out of the clip.
+            self.capture = _Capture("wake", at, wake_wait=at)
+            actions.append(SpeechStart(at, "wake"))
+        else:  # "hey glance" inside an open-state capture: drop everything up to the end of the phrase
+            cap.wake_wait, cap.gap, cap.chunks, cap.endpointer = at, [], [], None
+
+    def _wait_frame(self, cap: _Capture, frame: np.ndarray, voiced: bool, ft: float) -> None:
+        """While waiting out the wake phrase: the first 60 ms unvoiced gap after the detection ends it."""
+        if ft < cap.wake_wait - 1e-9:  # still inside the detection block
+            return
+        if voiced:
+            cap.gap = []
+            return
+        cap.gap.append((frame, ft))
+        if len(cap.gap) >= WAKE_GAP_FRAMES:
+            self._end_wake_wait(cap, cap.gap[0][1], cap.gap, "gap")
+
+    def _end_wake_wait(self, cap: _Capture, start: float, gap: list, how: str) -> None:
+        """Capture (and the no-speech window) starts here, with no pre-roll."""
+        self.log.write("wake_end", by=how, waited_ms=int(round((start - cap.wake_wait) * 1000)))
+        cap.wake_wait, cap.gap = None, []
+        cap.start_t = start
+        cap.endpointer = Endpointer(self.cfg, start)
+        cap.chunks = []
+        for frame, ft in gap:
+            cap.chunks.append((frame, ft))
+            cap.endpointer.push(False, ft)
 
     def ptt(self, down: bool, t: float) -> list:
         cap = self.capture
@@ -162,10 +217,10 @@ class Listener:
             if cap is not None:
                 if cap.source != "ptt":  # already capturing: hand it to push-to-talk, no second speech_start
                     self.log.write("ptt_takeover", source=cap.source)
-                    cap.source, cap.endpointer = "ptt", None
+                    cap.source, cap.endpointer, cap.wake_wait, cap.gap = "ptt", None, None, []
                 return []
             self._note_state("capture")
-            self.log.write("speech_start", source="ptt")
+            self.log.write("speech_start", source="ptt", at=round(t, 4))
             chunks = [(f, ft) for f, ft in self.ring if ft >= t - self.cfg.preroll_ms / 1000 - 1e-9]
             self.capture = _Capture("ptt", t, chunks)
             return [SpeechStart(t, "ptt")]
@@ -183,7 +238,7 @@ class Listener:
     # ---------------------------------------------------------------- capture
 
     def _capture_frame(self, cap: _Capture, voiced: bool, ft: float) -> Finish | None:
-        if cap.endpointer is None:  # push-to-talk: only release or the hard stop end it
+        if cap.source == "ptt":  # push-to-talk: only release or the hard stop end it
             if ft + FRAME_S - cap.start_t >= self.cfg.max_utterance_s - 1e-9:
                 return self._ptt_finish(cap, ft + FRAME_S, "max")
             return None
@@ -234,6 +289,7 @@ class Mic:
         self.ptt_source = ptt
         self.log = log or null_log()
         self.listener = Listener(cfg, vad, detector, lambda: self.wake_needed(), self.log)
+        self.wake_phrase = wake_phrase_pattern(cfg.assistant_name)
         self.q: queue.Queue = queue.Queue(maxsize=250)  # 20 s of blocks
         self.open_starts = 0  # speech_starts not yet answered by an utterance
         self.idle = threading.Event()  # set while the worker waits for input (tests)
@@ -326,7 +382,7 @@ class Mic:
 
     def _finish(self, f: Finish) -> None:
         self.log.write("speech_end", duration_ms=f.duration_ms, reason=f.reason)
-        text, frame = "", None
+        text, frame, backend = "", None, None
         if f.audio is not None:
             try:
                 frame = self.frame_source()  # what the user faced when they stopped talking, before STT
@@ -336,17 +392,22 @@ class Mic:
             if self.cfg.save_clips:
                 self._save_clip(wav)
             try:
-                text = self.transcriber.transcribe(wav).text
+                result = self.transcriber.transcribe(wav)
+                text, backend = result.text, result.backend
             except Exception as e:
                 self.log.error("mic.stt", e)
-        self._deliver_text(text, f.ended_at, frame, f.reason)
+            stripped = strip_wake_phrase(text, self.wake_phrase)  # backup for a wake phrase the audio trim missed
+            if stripped != text:
+                self.log.write("wake_phrase_stripped", chars_before=len(text), chars_after=len(stripped))
+                text = stripped
+        self._deliver_text(text, f.ended_at, frame, f.reason, backend)
         self.listener.reset()
         self._flush_audio()
 
-    def _deliver_text(self, text: str, ended_at: float, frame, reason: str) -> None:
+    def _deliver_text(self, text: str, ended_at: float, frame, reason: str, backend: str | None = None) -> None:
         self.window.on_delivered(text)
         self.open_starts = max(0, self.open_starts - 1)
-        self.log.write("utterance_delivered", chars=len(text), reason=reason,
+        self.log.write("utterance_delivered", chars=len(text), reason=reason, backend=backend,
                        latency_ms=int((time.time() - ended_at) * 1000))
         self.dispatch(self.sink.on_utterance, text, ended_at, frame)
 

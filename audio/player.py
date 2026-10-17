@@ -225,6 +225,7 @@ class Player:
         self._queue: deque[_Speech] = deque()  # head is the speech playing or next to play
         self._outbox: deque[tuple[str, str]] = deque()
         self._gen = 0  # bumped by stop_speech
+        self._stop_t = 0.0  # monotonic time of the last stop_speech, for the playback_cut latency
         self._cue: np.ndarray | None = None
         self._writing = False
         self._device_ok = False
@@ -257,6 +258,7 @@ class Player:
     def stop_speech(self) -> None:
         with self._cond:
             self._gen += 1
+            self._stop_t = time.monotonic()
             stopped = list(self._queue)
             self._queue.clear()
             done = list(self._outbox)
@@ -477,16 +479,21 @@ class Player:
         step = max(1, int(out_rate * CHUNK_S))
         for i in range(0, len(audio), step):
             if self._gen != gen or self._closed:
-                self.output.abort()
-                return False
+                return self._cut(gen)
             self.output.write(audio[i:i + step])
         deadline = time.monotonic() + (self.output.latency() if len(audio) else 0.0)
         while time.monotonic() < deadline:
             if self._gen != gen or self._closed:
-                self.output.abort()
-                return False
+                return self._cut(gen)
             time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
         return True
+
+    def _cut(self, gen: int) -> bool:
+        """Abort the stream (drops buffered audio) and log how long after stop_speech the sound stopped."""
+        self.output.abort()
+        if self._gen != gen:  # cut by stop_speech, not by close
+            self.log.write("playback_cut", ms=int((time.monotonic() - self._stop_t) * 1000))
+        return False
 
     def _play_speech(self, sp: _Speech, gen: int) -> None:
         if sp.failed:

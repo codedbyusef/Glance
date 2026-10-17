@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from audio.server.stt_service import create_app
-from audio.stt_client import to_wav
+from audio.server.stt_service import WARMUP_CLIP, create_app
+from audio.stt_client import read_wav, to_wav
 
 AUTH = {"Authorization": "Bearer tok"}
 
@@ -48,9 +48,11 @@ def test_health_and_transcribe():
     assert body["duration_s"] == 1.9
     assert body["no_speech_prob"] == 0.02 and body["avg_logprob"] == -0.21 and body["model"] == "small.en"
     assert isinstance(body["infer_ms"], int)
-    # warm-up on 1 s of silence with the decoder actually running, then the request; settings from section 9
-    assert model.calls[0][0] == 16000 and model.calls[0][1]["vad_filter"] is False
-    kw = model.calls[1][1]
+    # two warm-up passes on the bundled speech clip with the request settings, then the request (section 9)
+    clip_len = len(read_wav(WARMUP_CLIP.read_bytes())[0])
+    assert [n for n, _ in model.calls[:2]] == [clip_len, clip_len]
+    assert model.calls[0][1] == model.calls[2][1]
+    kw = model.calls[2][1]
     assert kw == {"language": "en", "beam_size": 5, "vad_filter": True, "condition_on_previous_text": False,
                   "initial_prompt": "done, yes, no, stop, wait, cancel, repeat"}
 
@@ -61,7 +63,16 @@ def test_empty_or_none_prompt_means_no_prompt(prompt):
     with c:
         c.post("/transcribe", content=wav(), headers=AUTH)
         assert c.get("/health", headers=AUTH).json()["initial_prompt"] is None
-    assert model.calls[1][1]["initial_prompt"] is None
+    assert model.calls[2][1]["initial_prompt"] is None
+
+
+def test_warm_up_falls_back_to_silence_without_the_clip(tmp_path):
+    model = StubModel()
+    app = create_app(model_factory=lambda n: model, token="tok", load_in_background=False,
+                     warmup_clip=tmp_path / "missing.wav")
+    with TestClient(app) as c:
+        assert c.get("/health", headers=AUTH).json()["ready"] is True
+    assert [(n, kw["vad_filter"]) for n, kw in model.calls] == [(16000, False), (16000, False)]
 
 
 def test_no_segments():
@@ -144,7 +155,7 @@ def test_request_that_waited_too_long_is_dropped():
 
     class SlowModel(StubModel):
         def transcribe(self, audio, **kwargs):
-            if len(self.calls) >= 1:  # after warm-up
+            if len(self.calls) >= 2:  # after warm-up
                 started.set()
                 gate.wait(5)
             return super().transcribe(audio, **kwargs)

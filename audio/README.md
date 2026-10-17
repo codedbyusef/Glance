@@ -143,6 +143,10 @@ python -m audio.cli echo                        # say each transcript back
 
 The wake model is `models/hey_glance.onnx`. If that file is missing, the `hey_jarvis` stand-in loads and the log says STAND-IN. If no model loads at all, push-to-talk still works.
 
+After a detection, the capture starts only when the wake phrase has ended: at the first 60 ms gap in the voice, when the score falls below `wake_end_threshold` (0.3), or after `wake_end_max_s` (1.0 s), whichever comes first. The wake model also runs during open-state captures; a detection there drops the audio up to the end of the phrase, so "hey glance, stop" arrives as "stop". A leading "hey glance" left in a transcript is stripped as a backup.
+
+Noise defaults: `vad_aggressiveness` 3, `speech_start_ms` 300 (every 20 ms frame of a 300 ms window voiced), and a capture is kept going only by voiced frames when more than half of the last 300 ms is voiced. If short commands ("no") are missed in open state, try `speech_start_ms: 260` in `config.yaml`; if mid-sentence pauses split utterances, raise `end_silence_ms`.
+
 ## Clip set and STT benchmark
 
 ```bash
@@ -152,6 +156,42 @@ python -m audio.cli stt-bench --out audio/clips/bench.csv          # both backen
 
 Clips and `labels.csv` go to `audio/clips/` (gitignored, since it holds voice recordings). `stt-bench` prints exact-match accuracy (lowercased, punctuation stripped), accuracy on the command clips, and p50/p95 latency per backend. To A/B the initial prompt, restart the server with `GLANCE_STT_INITIAL_PROMPT=none` and rerun. `stt-check` calls `/health` and transcribes the bundled `assets/stt_check.wav`.
 
+## Selftest, logs and stats
+
+```bash
+python -m audio.cli selftest            # or: python -m audio.cli --selftest. Run it first after each boot at the venue
+python -m audio.cli stats               # numbers from today's log, last session (listen, echo, say or selftest)
+python -m audio.cli stats --all --day 20261017
+python -m audio.cli echo --minutes 30   # soak test; prints the session summary at the end
+```
+
+`selftest` checks the wake model file and the env vars (it says whether the token is set, never what it is), plays a test sentence and the thinking tone, records 3 s, and transcribes the recording with the Vultr server (after `/health`) and the local fallback. It prints PASS, WARN or FAIL per line and exits 1 if anything failed.
+
+Every event goes to `audio/logs/audio-YYYYMMDD.jsonl` with `mono` and `wall` timestamps. `listen`, `echo`, `say` and `selftest` write a `session` line first, and `listen` and `echo` print the session's numbers when they exit. `stats` reads them back:
+
+- wake detections and their scores
+- speech starts by source; utterances, with empty ones by reason; starts left without an utterance (should be 0)
+- end of speech to `on_utterance`, per STT backend; STT time per backend; fallbacks
+- user starts talking (first voiced frame) to playback actually stopped
+- `stop_speech` to silence (the stream abort)
+- `say` to first audio for uncached speech
+- errors by place
+
+## Acceptance run on the Pi (section 14.3)
+
+With the USB headset, after `selftest` passes:
+
+| Check | Command | What to do |
+| --- | --- | --- |
+| Wake detections, 20 tries | `python -m audio.cli listen --no-tts --scores` | Say "hey glance" 20 times at normal voice, a few seconds apart, then Ctrl+C. Detections are in the summary |
+| False wakes, 10 min | `python -m audio.cli listen --no-tts --minutes 10` | Play or hold 10 min of nearby conversation. Wake detections in the summary are false wakes |
+| STT exact match (Vultr) | `python -m audio.cli record ...` x 40, then `python -m audio.cli stt-bench --out audio/clips/bench-pi.csv` | Half quiet, half with background chatter (`--tag quiet` / `--tag noisy`) |
+| End of speech to `on_utterance` | `python -m audio.cli listen --no-tts` | 20 commands and requests with the wake word, then Ctrl+C. Read the `vultr` line |
+| Talking over TTS to stopped | `python -m audio.cli echo` | Say a long request; while it is read back, say "stop". Repeat 10 times |
+| `stop_speech` to silence | same session | Read the `stop_speech -> silence` line |
+| `say` to first audio | `python -m audio.cli say "<a 20-word sentence>"` x 5 | Use different sentences (uncached), then `python -m audio.cli stats --all` |
+| 30 min soak | `python -m audio.cli echo --minutes 30` | Talk now and then. No crash, `unanswered starts: 0`, and it still answers at the end |
+
 ## Results (section 14.3)
 
-Not measured yet.
+Not measured yet. Laptop numbers so far (Windows, default devices, not the targets' hardware): `stop_speech` to silence 31 ms; `say` to first audio 389 ms for a 112-character sentence; GPU stand-in STT p50 320 ms, p95 514 ms over Tailscale (CLAUDE.md decision 17).

@@ -110,3 +110,130 @@ def test_stt_check(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert out.count("  OK") == 2 and "server infer 120 ms" in out
     assert "token: set" in out and "'t'" not in out
+
+
+# ------------------------------------------------------------------ stats
+
+def ev(event, mono, **fields):
+    return {"event": event, "mono": mono, "wall": 1000.0 + mono, **fields}
+
+
+def test_log_stats_reads_the_acceptance_numbers():
+    events = [
+        ev("session", 0.0, cmd="old"), ev("wake", 0.5, score=0.9, state="wake"),
+        ev("session", 1.0, cmd="echo"),
+        ev("wake", 2.0, score=0.95, state="wake"), ev("speech_start", 2.0, source="wake", at=1002.0),
+        ev("stt", 4.0, backend="vultr", ms=300), ev("utterance_delivered", 4.0, chars=5, reason="end",
+                                                    backend="vultr", latency_ms=1000),
+        ev("say_queued", 4.1, speech_id="s1", chars=40), ev("synth", 4.3, speech_id="s1", ms=200, cached=False),
+        ev("playback_start", 4.4, speech_id="s1", wait_ms=300),
+        ev("speech_start", 5.0, source="vad", at=1004.8),  # the user talks over the reply
+        ev("stop_speech", 5.05), ev("playback_cut", 5.1, ms=50),
+        ev("wake", 5.5, score=0.8, state="open", during="vad"),
+        ev("stt_fallback", 6.0, backend="vultr", reason="timeout"), ev("stt", 6.5, backend="local", ms=900),
+        ev("utterance_delivered", 6.5, chars=0, reason="end", backend="local", latency_ms=2900),
+        ev("speech_start", 8.0, source="ptt", at=1008.0),
+        ev("utterance_delivered", 8.1, chars=0, reason="too_short", backend=None, latency_ms=10),
+        ev("error", 9.0, where="capture"),
+    ]
+    st = cli.log_stats(cli.last_session(events))
+    assert st["cmd"] == "echo"
+    assert st["wakes"] == 1 and st["wakes_in_open_capture"] == 1
+    assert st["speech_starts"] == {"wake": 1, "vad": 1, "ptt": 1}
+    assert st["utterances"] == 3 and st["unanswered_starts"] == 0
+    assert st["empty_utterances"] == {"end": 1, "too_short": 1}
+    assert st["end_to_utterance_ms"]["vultr"]["p50"] == 1000 and st["end_to_utterance_ms"]["local"]["n"] == 1
+    assert st["stt_fallbacks"] == 1
+    assert st["barge_in_ms"]["p50"] == pytest.approx(300)  # voice at 1004.8, sound cut at 1005.1
+    assert st["stop_to_silence_ms"]["max"] == 50
+    assert st["say_to_first_audio_ms"]["p50"] == 300 and st["say_chars"] == [40]
+    assert st["errors"] == {"capture": 1}
+    cli.print_stats(st)  # formats without error
+
+
+def test_read_log_skips_broken_lines(tmp_path):
+    f = tmp_path / "audio.jsonl"
+    f.write_text('{"event": "a", "mono": 1, "wall": 1}\n{"event": "b", "mo\n', encoding="utf-8")
+    assert [e["event"] for e in cli.read_log(f)] == ["a"]
+    assert cli.read_log(tmp_path / "missing.jsonl") == []
+
+
+def test_stats_command(tmp_path, capsys):
+    f = tmp_path / "audio.jsonl"
+    f.write_text("\n".join(cli.json.dumps(e) for e in [ev("session", 0.0, cmd="listen"),
+                                                         ev("wake", 1.0, score=0.9, state="wake")]),
+                 encoding="utf-8")
+    assert cli.main(["stats", "--file", str(f)]) == 0
+    assert "wake detections: 1" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ selftest
+
+class FakeBackend:
+    def __init__(self, name, text="get me the can", error=None):
+        self.name, self.text, self.error = name, text, error
+
+    def transcribe(self, wav):
+        if self.error:
+            raise self.error
+        return RawTranscript(self.text)
+
+
+def selftest_player():
+    from audio.log import null_log
+    from audio.player import FakeOutput, FakeSynth, Player
+
+    p = Player(FakeSynth(), FakeOutput(realtime=False), log=null_log(), fixed_phrases=())
+    p.start()
+    return p
+
+
+def speech(seconds=3.0, amp=3000):
+    return (np.sin(np.arange(int(seconds * 16000)) / 5) * amp).astype(np.int16)
+
+
+def test_selftest_passes(monkeypatch):
+    monkeypatch.delenv("GLANCE_STT_URL", raising=False)
+    lines = []
+    p = selftest_player()
+    try:
+        code = cli.run_selftest(config.Config(), p, lambda s: speech(s), [FakeBackend("local")], out=lines.append)
+    finally:
+        p.close()
+    assert code == 0
+    text = "\n".join(lines)
+    assert "PASS  speaker: completed" in text and "PASS  mic" in text
+    assert "PASS  stt local" in text and "get me the can" in text
+
+
+def test_selftest_reports_failures(monkeypatch):
+    from audio.stt_client import SttError
+
+    monkeypatch.setenv("GLANCE_STT_URL", "http://x")
+    monkeypatch.delenv("GLANCE_STT_TOKEN", raising=False)
+    lines = []
+    code = cli.run_selftest(config.Config(), None, lambda s: np.zeros(48000, np.int16),
+                            [FakeBackend("vultr", error=SttError("timeout")), FakeBackend("local")],
+                            out=lines.append)
+    assert code == 1
+    text = "\n".join(lines)
+    for row in ("FAIL  GLANCE_STT_TOKEN", "FAIL  speaker", "FAIL  mic", "FAIL  stt vultr", "PASS  stt local"):
+        assert row in text
+
+
+def test_selftest_mic_error_is_a_failure_not_a_crash(monkeypatch):
+    monkeypatch.delenv("GLANCE_STT_URL", raising=False)
+
+    def broken(seconds):
+        raise OSError("no input device")
+
+    lines = []
+    assert cli.run_selftest(config.Config(), None, broken, [], out=lines.append) == 1
+    assert any(line.startswith("FAIL  mic") for line in lines)
+
+
+def test_selftest_flag(monkeypatch):
+    called = []
+    monkeypatch.setattr(cli, "cmd_selftest", lambda args, cfg: called.append(args.cmd) or 0)
+    assert cli.main(["--selftest"]) == 0 and called == ["selftest"]
+    assert cli.main(["selftest"]) == 0 and called == ["selftest", "selftest"]

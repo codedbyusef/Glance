@@ -131,6 +131,16 @@ def test_stop_cuts_audio_within_one_chunk(make):
     assert out.samples_written - at_stop <= int(16000 * 0.05)
 
 
+def test_stop_logs_when_the_sound_was_cut(make):
+    out = FakeOutput(rate=16000)
+    p, reports = make(output=out)
+    p.say("x" * 300, "none")
+    assert out.wrote.wait(2)
+    p.stop_speech()
+    assert wait_until(lambda: p.log.of("playback_cut"))
+    assert 0 <= p.log.of("playback_cut")[0]["ms"] <= 100
+
+
 def test_completed_just_before_stop_is_reported_once_and_first():
     out = FakeOutput(realtime=False)
     synth = FakeSynth()

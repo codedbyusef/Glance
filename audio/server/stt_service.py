@@ -14,6 +14,7 @@ import threading
 import time
 import wave
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -31,6 +32,10 @@ MAX_BODY_BYTES = MAX_SECONDS * SAMPLE_RATE * 2 + 4096  # PCM16 mono plus header 
 # A request that waited this long for the lock has been given up on by the client (its timeout is about 2 s),
 # so it is answered 503 without inference instead of delaying the requests behind it.
 STALE_S = 10.0
+# Warm-up: two passes on a real speech clip with the request settings, so the first real request doesn't pay for
+# CUDA kernel setup, the VAD model or the decoder's first run (decision 21). Silence is the fallback.
+WARMUP_CLIP = Path(__file__).resolve().parent.parent / "assets" / "stt_check.wav"
+WARMUP_PASSES = 2
 
 
 def add_cuda_dll_dirs() -> list[str]:
@@ -66,7 +71,8 @@ def _load_whisper(model_name: str, device: str):
 
 def create_app(model_factory: Callable[[str], object] | None = None, token: str | None = None,
                model_name: str | None = None, initial_prompt: str | None = None,
-               load_in_background: bool = True, device: str | None = None, stale_s: float = STALE_S) -> FastAPI:
+               load_in_background: bool = True, device: str | None = None, stale_s: float = STALE_S,
+               warmup_clip: Path | None = WARMUP_CLIP) -> FastAPI:
     """Settings default to the env vars. Tests pass a stub model_factory."""
     token = token if token is not None else os.environ.get("GLANCE_STT_TOKEN", "")
     model_name = model_name or os.environ.get("GLANCE_STT_MODEL", "small.en")
@@ -93,14 +99,29 @@ def create_app(model_factory: Callable[[str], object] | None = None, token: str 
             logger.info("loading: %s", settings)
             t0 = time.monotonic()
             model = factory(model_name)
-            # Warm-up on one second of silence. vad_filter off, or the VAD would drop it and the decoder never runs.
-            run(model, np.zeros(SAMPLE_RATE, dtype=np.float32), vad_filter=False)
+            warm_up(model)
             state["model"] = model
             state["ready"] = True
             logger.info("ready in %.1fs: %s", time.monotonic() - t0, settings)
         except Exception as e:
             state["error"] = repr(e)
             logger.exception("model load failed")
+
+    def warm_up(model) -> None:
+        audio, vad_filter = None, True
+        try:
+            samples, rate, channels, width = read_wav(Path(warmup_clip).read_bytes())
+            if rate == SAMPLE_RATE and channels == 1 and width == 2:
+                audio = to_float(samples)
+        except Exception as e:  # missing or bad clip: warm up on silence instead
+            logger.warning("warm-up clip %s unusable (%s); warming up on silence", warmup_clip, e)
+        if audio is None:
+            # vad_filter off, or the VAD would drop the silence and the decoder would never run.
+            audio, vad_filter = np.zeros(SAMPLE_RATE, dtype=np.float32), False
+        for i in range(WARMUP_PASSES):
+            t0 = time.monotonic()
+            r = run(model, audio, vad_filter=vad_filter)
+            logger.info("warm-up pass %d: %d ms, %r", i + 1, (time.monotonic() - t0) * 1000, r.text)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

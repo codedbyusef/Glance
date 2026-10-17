@@ -15,6 +15,7 @@ SAMPLE_RATE = 16000
 FRAME_S = 0.02
 FRAME_SAMPLES = 320
 START_WINDOW_S = 0.3  # speech_start_ms of voiced audio must fall within this window
+KEEP_RATIO = 0.5  # only voiced frames with over half of the last 300 ms voiced keep a capture going (decision 20)
 
 
 class VadClassifier(Protocol):
@@ -55,6 +56,10 @@ class StartDetector:
             return next(ft for v, ft in self.window if v)
         return None
 
+    def ratio(self) -> float:
+        """Voiced share of the last 300 ms."""
+        return sum(v for v, _ in self.window) / self.window.maxlen
+
     def reset(self) -> None:
         self.window.clear()
 
@@ -70,7 +75,9 @@ class Endpointer:
     """Tracks one VAD-endpointed capture.
 
     - started: speech has begun (VAD start, or the start rule met after a wake detection).
-    - An end needs end_silence_ms of unvoiced frames after the last voiced one.
+    - An end needs end_silence_ms after the last voiced frame that had over half of the last 300 ms voiced, so
+      scattered noise doesn't hold a capture open. It never ends on a voiced frame, so speech that resumes after a
+      pause isn't cut while the ratio builds back up.
     - A finished burst shorter than min_utterance_ms (first voiced to last voiced) doesn't end the capture: it waits up
       to no_speech_after_wake_s for speech to resume (same utterance), else reports "short".
     - Without speech, the capture reports "no_speech" after no_speech_after_wake_s from its start.
@@ -83,6 +90,8 @@ class Endpointer:
         self.first_voiced = first_voiced
         self.last_voiced_end = last_voiced_end
         self.detector = StartDetector(cfg.speech_start_ms)
+        if first_voiced is not None:  # started by a VAD start: the last 300 ms were speech
+            self.detector.window.extend([(True, first_voiced)] * self.detector.window.maxlen)
         self.waiting_until: float | None = None  # set while waiting after a too-short burst
 
     @property
@@ -110,7 +119,8 @@ class Endpointer:
             elif frame_end >= self.waiting_until - 1e-9:
                 return EndpointResult("short", self.first_voiced, self.last_voiced_end)
         elif voiced:
-            self.last_voiced_end = frame_end
+            if self.detector.ratio() > KEEP_RATIO:
+                self.last_voiced_end = frame_end
         elif frame_end - self.last_voiced_end >= cfg.end_silence_ms / 1000 - 1e-9:
             if self.span_s() * 1000 >= cfg.min_utterance_ms - 1e-6:
                 return EndpointResult("end", self.first_voiced, self.last_voiced_end)
