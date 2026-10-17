@@ -1,7 +1,0 @@
-openwakeword
-sounddevice
-numpy
-opencv-python
-websockets
-pyyaml
-requests

@@ -1,5 +1,0 @@
-numpy
-opencv-python
-torch
-transformers
-ultralytics  # YOLO-World detector
