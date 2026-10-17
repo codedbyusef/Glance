@@ -1,0 +1,22 @@
+# Vision server role (GPU host): object_detection server + hand_detection + depth_estimation.
+# Install the CUDA torch build FIRST, from the PyTorch index, so pip doesn't pull a CPU build:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r object_detection/requirements-server.txt
+#   pip install -e .
+# torchvision is needed by the SAM 2 image processor. On Vultr these come from the Docker image.
+
+transformers>=4.56      # Grounding DINO, Sam2VideoModel (streaming), Depth Anything V2
+fastapi
+uvicorn[standard]
+websockets
+pillow
+pyyaml
+numpy
+# The ONLY OpenCV wheel in this venv: contrib build, for the CSRT fallback tracker.
+# Never also install opencv-python here; two OpenCV wheels in one venv break cv2.
+opencv-contrib-python
+
+# Running the vision tests on this machine (fake models)
+pytest
+pytest-asyncio
+httpx

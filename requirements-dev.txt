@@ -1,0 +1,12 @@
+# Unit tests for every package, on any machine. Client deps plus test-only ones; no torch, no GPU.
+#   python -m venv .venv
+#   .venv\Scripts\pip install -r requirements-dev.txt
+#   .venv\Scripts\pip install -e .
+#   .venv\Scripts\python -m pytest
+-r runtime/requirements.txt
+
+pytest>=9.0
+pytest-asyncio>=1.4
+# object_detection's server and the audio STT service are tested in-process with fake models
+fastapi
+uvicorn[standard]

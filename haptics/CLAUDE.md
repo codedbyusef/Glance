@@ -30,4 +30,4 @@ link.set(cmd.levels, cmd.wrist_hz)
 ```
 
 ## Tests
-`pip install -r haptics/requirements.txt && python -m pytest haptics -q` (24 tests, no hardware needed).
+`python -m pytest haptics -q` from the repo root, in the root venv (`requirements-dev.txt`; pyserial is in `runtime/requirements.txt`) (24 tests, no hardware needed).

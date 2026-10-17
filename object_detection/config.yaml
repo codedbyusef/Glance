@@ -1,0 +1,66 @@
+# Settings for object detection + tracking. Starting values -- tune, not measured.
+
+# Frames as the laptop sends them to the server (JPEG). Widen if small objects are missed.
+frame:
+  frame_width: 480
+  frame_height: 360
+  jpeg_quality: 70
+
+camera:
+  source: 0   # webcam index, or a video/stream URL
+
+# reach_api.py: the synchronous start/pause/resume/cancel API the agent calls.
+reach_api:
+  stream_fps: 15          # frames sent to the server per second during a reach
+  start_timeout_s: 3.0    # connect + `started` reply, else ReachStartError
+  no_reply_s: 2.0         # no message from the server for this long while running -> stale_link
+  keep_frames: 30         # recent JPEGs kept so the end report's frame_id comes back as a full frame
+
+# Where the vision server runs. The laptop client reads these.
+# The Vultr IPv4 is not known yet: leave host empty and set GLANCE_VULTR_HOST in
+# object_detection/.env once the instance exists (the deploy scripts read only .env).
+# See README "Vultr".
+vultr:
+  host: ""              # Vultr instance public IPv4 (env GLANCE_VULTR_HOST wins)
+  server_port: 8000     # port uvicorn listens on, on the instance (GLANCE_SERVER_PORT for the scripts)
+  local_port: 8000      # laptop end of the SSH tunnel (GLANCE_LOCAL_PORT for the scripts)
+  use_tunnel: true      # true: ws://localhost:<local_port> through `deploy/tunnel.sh`
+                        # false: ws://<host>:<server_port> directly (open the firewall + set GLANCE_TOKEN)
+
+server:
+  device: auto          # auto | cuda | mps | cpu
+  fp16: true            # half precision on CUDA only
+
+detector:
+  model_id: IDEA-Research/grounding-dino-tiny   # or grounding-dino-base (slower, better on long phrases)
+  box_threshold: 0.15   # keep candidates at or above this score (low on purpose; the top box is used)
+  text_threshold: 0.15
+  max_box_frac: 0.6     # drop boxes covering more of the frame than this (absent target -> whole-scene box)
+  ambiguous_gap: 0.0    # top-two score gap below this -> `ambiguous`. 0 = off: the agent
+                        # (guide_agent/CLAUDE.md section 10) has no `ambiguous` status yet. Try 0.03 once it does.
+
+tracker:
+  backend: sam2         # sam2 | csrt (OpenCV fallback, CPU, no mask)
+  model_id: facebook/sam2.1-hiera-tiny          # or -small / -base-plus
+  mask_threshold: 0.0   # logits above this are object pixels
+  min_mask_frac: 0.0005 # a mask smaller than this fraction of the frame counts as gone
+  min_score: 0.5        # SAM 2 object score (sigmoid) below this counts as gone
+  lost_frames: 4        # frames in a row with no usable mask before re-running the detector
+  reacquire_min_iou: 0.1  # re-acquire only takes a box overlapping the last box by this IoU
+                          # (else a look-alike elsewhere in the frame steals the reach)
+
+# Reach session thresholds (object_detection/CLAUDE.md "End statuses").
+reach_session:
+  target_not_found_after_s: 3.0
+  target_lost_after_s: 2.0
+  hand_lost_after_s: 1.5
+  stalled_after_s: 7.0
+  timeout_s: 28.0
+  stale_link_after_s: 0.5
+  resume_reacquire_after_s: 3.0
+  success_hold_frames: 7          # fingertip in box for this many frames in a row (5-10 band)
+  depth_near_band: 0.1            # |target depth - hand depth| for success, once a depth model is added
+  inferred_cover_frac: 0.5        # hand box covers over half the last target box...
+  inferred_cover_frames: 3        # ...for this many of the last frames before the target vanished
+  touching_dist_frac: 0.05        # hand-to-box distance (fraction of frame diagonal) for closest_approach
+  near_dist_frac: 0.20

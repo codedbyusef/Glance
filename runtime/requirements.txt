@@ -1,0 +1,32 @@
+# Client role: the Windows laptop now, the Raspberry Pi 5 (64-bit OS, aarch64) at the demo. No torch.
+# Every package here has aarch64 wheels for Python 3.11 and 3.13.
+#   pip install -r runtime/requirements.txt
+#   pip install --no-deps openwakeword==0.6.0     # its metadata wants tflite-runtime (no aarch64 wheel); deps are below
+#   pip install -e .
+# On the Pi, audio/scripts/install_pi.sh does all three (plus apt libportaudio2).
+
+# agent (guide_agent)
+google-genai>=2.31
+pillow>=10.3
+pyyaml>=6.0
+
+# audio, Pi side: capture, VAD, Piper TTS, STT client + local fallback
+numpy
+scipy
+httpx
+sounddevice
+webrtcvad-wheels
+piper-tts==1.8.0
+faster-whisper
+# openwakeword's real runtime deps (it is installed with --no-deps, see above)
+onnxruntime
+scikit-learn
+tqdm
+requests
+
+# haptics: glove link over USB serial
+pyserial>=3.5
+
+# camera, and the object_detection client (reach_api, client): one OpenCV wheel only
+opencv-python
+websockets

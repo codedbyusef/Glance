@@ -12,9 +12,9 @@ License note: `piper-tts` is GPL-3.0, while this repo is MIT. That's acceptable 
 ## Unit tests (any machine)
 
 ```bash
-python -m venv audio/.venv
-audio/.venv/bin/pip install -r audio/requirements-dev.txt     # Windows: audio\.venv\Scripts\pip
-audio/.venv/bin/python -m pytest audio/tests -q
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt     # repo-root dev requirements. Windows: .venv\Scripts\pip
+.venv/bin/python -m pytest audio -q
 ```
 
 No mic, speaker, GPU, network or model files needed.
@@ -25,7 +25,7 @@ From the repo root in PowerShell:
 
 ```powershell
 python -m venv audio\.venv
-audio\.venv\Scripts\pip install -r audio\requirements-laptop.txt
+audio\.venv\Scripts\pip install -r requirements-dev.txt      # client deps (runtime\requirements.txt) + fastapi/uvicorn + pytest
 audio\.venv\Scripts\pip install --no-deps openwakeword==0.6.0
 audio\.venv\Scripts\python audio\scripts\fetch_models.py      # Piper voice, wake models, tiny.en
 ```
@@ -113,7 +113,7 @@ export GLANCE_STT_URL=https://<vultr-host>:8001     # base URL; /transcribe is a
 export GLANCE_STT_TOKEN=<token from the server>
 ```
 
-openWakeWord's Linux metadata requires `tflite-runtime`, which has no aarch64 wheel for Python 3.11 or 3.13. So the install script runs `pip install --no-deps openwakeword==0.6.0`, the real runtime deps (`onnxruntime numpy scipy scikit-learn tqdm requests`) come from `requirements-pi.txt`, and the code always uses `inference_framework="onnx"`.
+openWakeWord's Linux metadata requires `tflite-runtime`, which has no aarch64 wheel for Python 3.11 or 3.13. So the install script runs `pip install --no-deps openwakeword==0.6.0`, the real runtime deps (`onnxruntime numpy scipy scikit-learn tqdm requests`) come from `runtime/requirements.txt`, and the code always uses `inference_framework="onnx"`.
 
 `scripts/fetch_models.sh` (a wrapper for `fetch_models.py`) downloads the Piper voice into `audio/models/`, openWakeWord's feature models plus the `hey_jarvis` stand-in, and caches faster-whisper `tiny.en`.
 
