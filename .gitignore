@@ -1,13 +1,16 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-*/
 venv/
 *.egg-info/
-
-# eval logs are regenerated per trial; keep the directory, not the data
-eval/logs/*
-!eval/logs/.gitkeep
+build/
 
 .DS_Store
 *.env
 .env
+
+# live-test logs (JSONL per frame); copy numbers into the write-up
+runtime/logs/
+# per-machine runtime settings (camera index, glove port)
+runtime/config.local.yaml

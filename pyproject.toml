@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glance"
+version = "0.1.0"
+description = "Voice-controlled reach assistant for blind users: head camera, agent, haptic glove (SwampHacks XII)."
+requires-python = ">=3.11"
+# No dependencies on purpose. Each machine role installs its own requirements file, so the
+# laptop/Pi never pulls torch:
+#   client (laptop, Pi)  runtime/requirements.txt
+#   vision server (GPU)  object_detection/requirements-server.txt (torch CUDA build installed first)
+#   STT server (GPU)     audio/requirements-server.txt, audio/requirements-server-windows.txt
+#   unit tests           requirements-dev.txt
+# Then `pip install -e .` (editable, so each package reads its config.yaml from the source tree).
+
+[tool.setuptools.packages.find]
+include = [
+    "guide_agent*",
+    "audio*",
+    "haptics*",
+    "object_detection*",
+    "hand_detection*",
+    "depth_estimation*",
+    "runtime*",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "guide_agent/tests",
+    "audio/tests",
+    "haptics/tests",
+    "object_detection/tests",
+    "hand_detection/tests",
+    "depth_estimation/tests",
+    "runtime/tests",
+]
+pythonpath = ["."]
+asyncio_mode = "auto"

@@ -12,9 +12,9 @@ License note: `piper-tts` is GPL-3.0, while this repo is MIT. That's acceptable 
 ## Unit tests (any machine)
 
 ```bash
-python -m venv audio/.venv
-audio/.venv/bin/pip install -r audio/requirements-dev.txt     # Windows: audio\.venv\Scripts\pip
-audio/.venv/bin/python -m pytest audio/tests -q
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt     # repo-root dev requirements. Windows: .venv\Scripts\pip
+.venv/bin/python -m pytest audio -q
 ```
 
 No mic, speaker, GPU, network or model files needed.
@@ -25,7 +25,7 @@ From the repo root in PowerShell:
 
 ```powershell
 python -m venv audio\.venv
-audio\.venv\Scripts\pip install -r audio\requirements-laptop.txt
+audio\.venv\Scripts\pip install -r requirements-dev.txt      # client deps (runtime\requirements.txt) + fastapi/uvicorn + pytest
 audio\.venv\Scripts\pip install --no-deps openwakeword==0.6.0
 audio\.venv\Scripts\python audio\scripts\fetch_models.py      # Piper voice, wake models, tiny.en
 ```
@@ -70,15 +70,15 @@ curl -s -H "Authorization: Bearer $GLANCE_STT_TOKEN" -H "Content-Type: audio/wav
 Until Vultr is set up, the STT server runs on a Windows PC with an NVIDIA GPU. The client only needs `GLANCE_STT_URL=http://100.112.104.87:8001` (decision 17). PowerShell on the GPU PC, from the repo root:
 
 ```powershell
-python -m venv audio\.venv-server
-audio\.venv-server\Scripts\python -m pip install --upgrade pip
-audio\.venv-server\Scripts\pip install -r audio\requirements-server-windows.txt
+python -m venv audio\.venv
+audio\.venv\Scripts\python -m pip install --upgrade pip
+audio\.venv\Scripts\pip install -r audio\requirements-server-windows.txt
 
 $env:GLANCE_STT_TOKEN = "<long random token; same value on the laptop>"
 $env:GLANCE_STT_MODEL = "small.en"
 $env:GLANCE_STT_DEVICE = "cuda"
 # $env:GLANCE_STT_INITIAL_PROMPT = "none"     # for the A/B run without the prompt
-audio\.venv-server\Scripts\python -m uvicorn audio.server.stt_service:app --host 0.0.0.0 --port 8001
+audio\.venv\Scripts\python -m uvicorn audio.server.stt_service:app --host 0.0.0.0 --port 8001
 ```
 
 The startup log prints the CUDA DLL folders it added, then `ready in ...: {'model': 'small.en', 'device': 'cuda', 'beam_size': 5, 'initial_prompt': ...}`.
@@ -100,7 +100,7 @@ From the laptop:
 
 ```powershell
 $env:GLANCE_STT_URL = "http://100.112.104.87:8001"; $env:GLANCE_STT_TOKEN = "<same token>"
-audio\.venv\Scripts\python -m audio.cli stt-check
+.venv\Scripts\python -m audio.cli stt-check          # laptop, root venv
 ```
 
 ## Pi: setup from a fresh Raspberry Pi OS (64-bit)
@@ -113,7 +113,7 @@ export GLANCE_STT_URL=https://<vultr-host>:8001     # base URL; /transcribe is a
 export GLANCE_STT_TOKEN=<token from the server>
 ```
 
-openWakeWord's Linux metadata requires `tflite-runtime`, which has no aarch64 wheel for Python 3.11 or 3.13. So the install script runs `pip install --no-deps openwakeword==0.6.0`, the real runtime deps (`onnxruntime numpy scipy scikit-learn tqdm requests`) come from `requirements-pi.txt`, and the code always uses `inference_framework="onnx"`.
+openWakeWord's Linux metadata requires `tflite-runtime`, which has no aarch64 wheel for Python 3.11 or 3.13. So the install script runs `pip install --no-deps openwakeword==0.6.0`, the real runtime deps (`onnxruntime numpy scipy scikit-learn tqdm requests`) come from `runtime/requirements.txt`, and the code always uses `inference_framework="onnx"`.
 
 `scripts/fetch_models.sh` (a wrapper for `fetch_models.py`) downloads the Piper voice into `audio/models/`, openWakeWord's feature models plus the `hey_jarvis` stand-in, and caches faster-whisper `tiny.en`.
 
@@ -140,6 +140,10 @@ python -m audio.cli listen --scores             # print wake scores >= 0.2, for 
 python -m audio.cli listen --wav some.wav       # replay a 16 kHz mono recording instead of the mic
 python -m audio.cli echo                        # say each transcript back
 ```
+
+`ptt_only: true` in `config.yaml` (or `runtime.voice_agent --ptt-only`) is for running without headphones:
+no wake word and no open-state VAD, so the speaker can't trigger a capture. Push-to-talk still works in
+every state, and pressing it while speech plays is still a barge-in (decision 26).
 
 The wake model is `models/hey_glance.onnx`. If that file is missing, the `hey_jarvis` stand-in loads and the log says STAND-IN. If no model loads at all, push-to-talk still works.
 

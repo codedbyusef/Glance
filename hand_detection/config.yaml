@@ -1,0 +1,21 @@
+# Settings for the hand_detection band tracker. Starting values -- tune, not measured.
+
+# Frames are processed the way the perception server will receive them.
+frame:
+  frame_width: 640
+  frame_height: 480
+  jpeg_quality: 70
+
+camera:
+  source: 0 # webcam index, or a video/stream URL
+
+hand_marker:
+  # OpenCV HSV ranges (H 0-179, S/V 0-255). Replace with what tune_marker.py prints.
+  hsv_ranges:
+    - [[34, 66, 105], [54, 255, 255]] # fluorescent green
+  min_area_px: 40 # band pieces smaller than this are noise
+  max_area_frac: 0.15 # a piece bigger than this fraction of the frame is not the band
+  merge_radius_frac: 0.08 # pieces this close (fraction of frame diagonal) are the same band
+  max_jump_frac: 0.35 # prefer pieces near last frame's point
+  blur_ksize: 5
+  morph_ksize: 5

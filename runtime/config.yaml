@@ -1,0 +1,28 @@
+# Runtime (client) settings, shared by every machine. Per-machine overrides (the Pi's camera, the glove's
+# serial port) go in runtime/config.local.yaml (gitignored), with the same keys, e.g.
+#   camera:
+#     source: 0
+#   glove:
+#     kind: hardware
+#     port: /dev/ttyUSB0
+
+camera:
+  source: 1            # webcam index (1 = the Logitech Brio on the laptop, 0 = the built-in webcam),
+                       # "picam" for the Pi camera module (Picamera2), or a video path/URL
+  width: 1280
+  height: 720
+  dshow: true          # Windows: open webcams with CAP_DSHOW (faster to open, honors the size)
+  fourcc: MJPG         # webcams: compressed MJPG; the default YUY2 at 1280x720 caps USB webcams at ~5 FPS
+  fps: 30              # requested webcam frame rate
+  warmup_frames: 45    # the first frames come out dark while auto-exposure settles
+  jpeg_quality: 85     # agent frames; their long edge is capped by guide_agent's frame_max_long_edge_px
+
+view:
+  web_port: 8090       # --view web: MJPEG at http://<host>:8090/
+  width: 960           # displayed width of the live view (the camera frame is scaled to it)
+
+glove:
+  kind: fake           # fake (drawn on the live view) | hardware (USB serial, Step 4)
+  port: auto           # hardware: auto finds the Feather ESP32-S3; or e.g. /dev/ttyACM0 (Pi), COM5 (Windows)
+  on_level: 255        # level for an "on" motor (motors are on or off); code.py maps 255 to 85% duty
+  firmware: s3         # s3: firmware/glove/code.py, 6 motors, no wrist | ino8: glove.ino, 8 motors

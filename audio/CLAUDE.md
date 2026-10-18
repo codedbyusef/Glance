@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This directory is Glance's voice I/O. It hears the wake phrase "hey glance", detects when the user starts and stops speaking, turns speech into text, and speaks the agent's replies. The agent (`agent/`) decides what to say. This component only moves audio in and out and reports events.
+This directory is Glance's voice I/O. It hears the wake phrase "hey glance", detects when the user starts and stops speaking, turns speech into text, and speaks the agent's replies. The agent (`guide_agent/`) decides what to say. This component only moves audio in and out and reports events.
 
 None of this is the novel part of the project. Use proven components in their standard configuration. No custom models, except training the "hey glance" wake phrase with openWakeWord's standard notebook.
 
@@ -16,7 +16,7 @@ Working rules:
 - This file is the spec. The contracts in section 5 are shared with the agent. Don't change them without asking.
 - If the spec is silent or contradicts itself, ask instead of guessing.
 - 36-hour hackathon: prefer the simplest thing that works reliably. No streaming STT, no custom DSP, no new ML.
-- Build in isolation. Don't import from or edit anything outside `audio/`. The agent's interfaces are restated in section 5. Integration happens later (section 15).
+- Build in isolation. Don't import from or edit anything outside `audio/` (superseded at integration by the root CLAUDE.md). The agent's interfaces are restated in section 5. Integration happens later (section 15).
 - Every unit test runs with no mic, speaker, GPU, network, or model files. Hardware and models sit behind small interfaces with fakes.
 - Secrets come from environment variables. Never log tokens. Don't save audio unless `save_clips` is on.
 - Nothing on the Pi's audio path may crash the process. Device errors, server errors, and model errors are logged and recovered from (section 12).
@@ -74,7 +74,7 @@ License note: `piper-tts` is GPL-3.0 and the repo is MIT. That's fine for the ha
 
 ## 5. Contracts with the agent
 
-These restate `agent/CLAUDE.md` section 5 and section 19 decisions 5 to 7, plus `agent/guide_agent/interfaces.py`. Signatures and semantics must match exactly, so integration is just passing objects in.
+These restate `guide_agent/CLAUDE.md` section 5 and section 19 decisions 5 to 7, plus `guide_agent/interfaces.py`. Signatures and semantics must match exactly, so integration is just passing objects in.
 
 ### 5.1 Output: `Player` implements `AudioOut`
 
@@ -238,7 +238,7 @@ Layout:
 
 ```
 audio/
-  CLAUDE.md  README.md  requirements-pi.txt  requirements-server.txt  config.py
+  CLAUDE.md  README.md  requirements-server.txt  config.py   (Pi/laptop deps: runtime/requirements.txt at the repo root)
   capture.py        mic stream, resampling, device recovery
   wake.py           openWakeWord wrapper (Detector interface + fake)
   vad.py            WebRTC VAD + endpointer state machine (pure, testable on synthetic frames)
@@ -305,7 +305,7 @@ The runtime glue that eventually connects everything will:
 - Set `task_active = lambda: controller.task is not None` and `frame_source = camera.latest_frame`.
 - Run `controller.tick()` every 100 ms.
 
-Agent-side changes are for the agent owner, not this build: set `assistant_name: Glance` in `agent/config.yaml`, and let `Harness` accept an injected audio object, so a `voice_chat` script can reuse `WebcamHarness` with real voice.
+Agent-side changes are for the agent owner, not this build: set `assistant_name: Glance` in `guide_agent/config.yaml`, and let `Harness` accept an injected audio object, so a `voice_chat` script can reuse `WebcamHarness` with real voice.
 
 ## 16. Milestones and definition of done
 
@@ -334,7 +334,7 @@ These resolve gaps found while planning. They take precedence over earlier secti
 12. An `expect` other than `none`, `done` or `answer` is logged and treated as `none`.
 13. The Mic is constructed with the Player (its `busy` and the shared reply window), in addition to the section 15 wiring.
 14. The STT server also reads `GLANCE_STT_DEVICE` (`cuda`, the default, with float16; `cpu` with int8), so it can run on a dev laptop. A request that waited more than 10 s for the model lock is answered 503 without inference: its client has already timed out, and running it would only delay the requests behind it.
-15. Until the Pi exists, a Windows laptop is the test machine. `say`, `listen`, `record`, `echo` and `stt-bench` must work there with the default mic and speakers. `requirements-laptop.txt` installs everything, and `scripts/fetch_models.py` (which `fetch_models.sh` wraps) fetches models on any OS.
+15. Until the Pi exists, a Windows laptop is the test machine. `say`, `listen`, `record`, `echo` and `stt-bench` must work there with the default mic and speakers. `requirements-dev.txt` at the repo root installs everything (it replaced `requirements-laptop.txt` in the integration Step 0), and `scripts/fetch_models.py` (which `fetch_models.sh` wraps) fetches models on any OS.
 16. Initial prompt A/B on `tiny.en`, 10 real laptop clips (all quiet), local CPU server: with the prompt 70% exact and 83% on commands (misses: "stop" heard as "stop, stop...", "guide me to the paper" as "and guide me to the paper.", "desk" as "disc"). Without it, 70% exact and 67% on commands (misses: "cancel" as "Can't sue.", "stop" returned empty, "desk" as "disc"). In-process local fallback (`tiny.en`, beam 1, no prompt): 90% exact, 100% on commands. The prompt stays the default; rerun the A/B with `small.en` on the GPU. `GLANCE_STT_INITIAL_PROMPT=none` also means no prompt, since PowerShell deletes an env var set to `""`. The server logs its model, device, beam size and prompt at startup and returns them from `/health`.
 17. Until Vultr is set up, the STT server runs on a Windows PC with an RTX 3070, reached over Tailscale (e.g. `http://100.112.104.87:8001`). Nothing in the client changes except `GLANCE_STT_URL`. On Windows the server makes the pip `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` (cuDNN 9) DLLs loadable with `os.add_dll_directory` before importing faster-whisper (`requirements-server-windows.txt`). `stt-check` calls `/health` and transcribes the bundled `assets/stt_check.wav` ("Get me the can.", rendered with Piper).
 18. `audio/models/hey_glance.onnx` exists and is the default `wake_model`. The `hey_jarvis` stand-in is used only when the configured file is missing.
@@ -346,3 +346,4 @@ These resolve gaps found while planning. They take precedence over earlier secti
 23. Prompt echo filter (client side, all backends): a transcript is dropped with `dropped_reason="prompt_echo"` when it has more than 2 words that all come from the default initial prompt, or any prompt word appears 3 or more times (case and punctuation ignored). It came from small.en transcribing a 2.2 s noise capture as "cancel, repeat, cancel, repeat, cancel, repeat, cancel,". The prompt words come from `stt_client.DEFAULT_PROMPT`, which the server also uses.
 24. Wake tone: on every wake detection the Mic calls `player.cue("wake")`, a 90 ms 990 Hz tone, which the Player drops if anything is playing (as for "thinking"). Config key `wake_tone` (default true). "wake" is a Player-internal cue name; the agent's contract still uses only "thinking".
 25. `stats --session last|all|<id>`: `last` (the default) is the last `listen` or `echo` session; session ids are the start time (HHMMSS) and are printed in each summary. `selftest` marks an empty transcript from any backend, and a mic peak under 3000, as WARN.
+26. Push-to-talk only (integration Step 1, for speakers instead of headphones): config key `ptt_only` (default false). When on, the Listener's idle state is `ptt`: no wake word (no model is loaded) and no open-state VAD start, so speaker output can't start a capture. Push-to-talk works as in section 6 and decision 4, and a press during playback fires `on_speech_start` (a barge-in). The section 5 contracts are unchanged. `build_mic` also takes an optional `ptt` source, so the runtime can own stdin.

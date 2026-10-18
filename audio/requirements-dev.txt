@@ -1,7 +1,0 @@
-# Enough to run the unit tests anywhere (no audio, ML or GPU packages needed).
-numpy
-scipy
-httpx
-fastapi
-pyyaml
-pytest

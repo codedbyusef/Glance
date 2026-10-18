@@ -115,6 +115,8 @@ class Listener:
     def state(self) -> str:
         if self.capture is not None:
             return "capture"
+        if self.cfg.ptt_only:
+            return "ptt"
         return "wake" if self.wake_needed() else "open"
 
     def reset(self) -> None:
@@ -136,7 +138,7 @@ class Listener:
         state = self.state()
         self._note_state(state)
         score = None
-        if self.detector is not None:
+        if self.detector is not None and not self.cfg.ptt_only:
             score = self.detector.score(block)  # fed in every state: detections also trim open-state captures
             if self.score_hook is not None:
                 self.score_hook(score, t)
@@ -447,8 +449,11 @@ class Mic:
 
 def build_mic(cfg, sink, player=None, window: ReplyWindow | None = None, dispatch: Callable = direct_dispatch,
               frame_source: Callable[[], object] = lambda: None, task_active: Callable[[], bool] = lambda: False,
-              log: EventLog | None = None, transcriber=None, capture=None) -> Mic:
-    """The real Mic from config: sounddevice capture, WebRTC VAD, openWakeWord, the STT client, push-to-talk."""
+              log: EventLog | None = None, transcriber=None, capture=None, ptt=None) -> Mic:
+    """The real Mic from config: sounddevice capture, WebRTC VAD, openWakeWord, the STT client, push-to-talk.
+
+    ptt: a push-to-talk source to use instead of the one cfg.ptt names (the runtime owns stdin). With
+    cfg.ptt_only no wake model is loaded."""
     from .capture import SoundDeviceCapture
     from .ptt import build_ptt
     from .stt_client import build_transcriber, check_health, preload_fallback
@@ -463,5 +468,6 @@ def build_mic(cfg, sink, player=None, window: ReplyWindow | None = None, dispatc
             preload_fallback(transcriber, log)
     capture = capture if capture is not None else SoundDeviceCapture(cfg.input_device, log)
     return Mic(cfg, sink, transcriber, capture, WebRtcVad(cfg.vad_aggressiveness),
-               detector=load_detector(cfg, log), player=player, window=window, dispatch=dispatch,
-               frame_source=frame_source, task_active=task_active, ptt=build_ptt(cfg.ptt, log), log=log)
+               detector=None if cfg.ptt_only else load_detector(cfg, log), player=player, window=window,
+               dispatch=dispatch, frame_source=frame_source, task_active=task_active,
+               ptt=ptt if ptt is not None else build_ptt(cfg.ptt, log), log=log)

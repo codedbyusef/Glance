@@ -1,5 +1,0 @@
-google-genai>=2.31
-pillow>=10.3
-pyyaml>=6.0
-pytest>=9.0
-pytest-asyncio>=1.4

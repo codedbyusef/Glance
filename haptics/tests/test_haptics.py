@@ -29,6 +29,29 @@ def test_frame_rejects_bad_input():
         encode_frame([0] * 7 + [256])
 
 
+def test_s3_frames_carry_six_levels_in_wire_order():
+    from haptics.protocol import BACK, INDEX, PALM, PINKY, RING, S3_CHANNELS, THUMB, encode_levels, wire_levels
+
+    levels = [10, 11, 12, 13, 14, 15, 16, 17]       # thumb index middle ring pinky back palm wrist
+    wire = wire_levels(levels, S3_CHANNELS)
+    assert wire == [levels[ch] for ch in (THUMB, INDEX, RING, PINKY, BACK, PALM)] == [10, 11, 13, 14, 15, 16]
+    f = encode_levels(wire)
+    assert len(f) == 8 and f[0] == 0xAA and f[-1] == 10 ^ 11 ^ 13 ^ 14 ^ 15 ^ 16
+    assert wire_levels(levels) == levels
+
+
+def test_link_sends_only_the_firmware_channels():
+    from haptics.protocol import PALM, S3_CHANNELS, THUMB
+
+    link = GloveLink(dry_run=True, channels=S3_CHANNELS)
+    levels = [0] * 8
+    levels[THUMB], levels[PALM], levels[WRIST] = 255, 200, 255
+    link.set(levels, wrist_hz=2.0)
+    f = link.wire_frame_at(0.1)
+    assert list(f[1:7]) == [255, 0, 0, 0, 0, 200]      # no middle, no wrist on the S3 glove
+    assert len(GloveLink(dry_run=True).wire_frame_at(0.0)) == 10  # default: all 8 (glove.ino)
+
+
 def test_command():
     assert encode_command(1) == bytes([0xA5, 0x01])
 
@@ -163,9 +186,24 @@ def test_link_gates_wrist_at_its_pulse_rate():
     link = GloveLink(dry_run=True)
     levels = [0] * 8
     levels[PROXIMITY] = 200
-    link.set(levels, wrist_hz=2.0)       # period 0.5 s: on for 0.25 s, off for 0.25 s
+    link.set(levels, wrist_hz=2.0)       # period 0.5 s: on for 0.25 s, off for 0.25 s, from the first frame
     assert link.frame_at(0.10)[WRIST] == 200
-    assert link.frame_at(0.35)[WRIST] == 0
+    assert link.frame_at(0.40)[WRIST] == 0
+    assert link.frame_at(0.62)[WRIST] == 200
+
+
+def test_link_pulses_any_channel_and_rate_changes_stay_smooth():
+    link = GloveLink(dry_run=True)
+    levels = [0] * 8
+    levels[0] = 255
+    link.set(levels, pulse_hz={0: 2.0})
+    assert link.frame_at(1000.00)[0] == 255     # a pulse starts with its "on" half
+    assert link.frame_at(1000.30)[0] == 0       # 0.3 s at 2 Hz: second half
+    link.set(levels, pulse_hz={0: 2.1})         # a small rate change does not jump the phase
+    assert link.frame_at(1000.32)[0] == 0
+    assert link.frame_at(1000.52)[0] == 255     # next period begins
+    link.set(levels)                            # no pulse: steady on
+    assert link.frame_at(1000.80)[0] == 255
 
 
 def test_link_clamps_levels():
