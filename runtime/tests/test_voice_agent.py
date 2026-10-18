@@ -251,8 +251,12 @@ def test_overlay_renders_without_a_camera_image(rigs):
     r = Rig(ScriptedModel(), [])
     rigs.append(r)
     r.app.status.set(transcript="hello", sent_frame=None)
-    canvas = Overlay(r.app, 640, "ptt-only").render()
-    assert canvas.shape[1] == 640 and canvas.any()
+    side = Overlay(r.app, 640, "ptt-only").render()                     # default: camera + side panel
+    assert side.shape[1] == 640 + 430 and side.any()
+    from runtime.view import blank
+    assert (side[:360, :640] == blank(640, 360)).all()  # the video area is untouched by the panel
+    over = Overlay(r.app, 640, "ptt-only", layout="overlay").render()
+    assert over.shape[1] == 640 and over.any()
 
 
 def test_typed_utterance_gets_the_camera_frame_and_is_spoken(rigs):

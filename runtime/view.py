@@ -169,6 +169,8 @@ class View:
         self._period = 1.0 / max_fps
         self._last = 0.0
         self._server = _MjpegServer(port) if mode == "web" else None
+        if mode == "window":  # resizable (drag the corner), keeping the aspect ratio
+            cv2.namedWindow(title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         if mode == "web":
             print(f"live view: http://<this host>:{port}/  (keys: type a letter, then Enter)", flush=True)
 

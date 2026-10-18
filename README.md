@@ -185,7 +185,14 @@ mirroring what the glove was told, with the ones this glove lacks crossed out.
 
 ```bash
 python -m runtime.run --ptt-only        # or: bash runtime/scripts/run_glance.sh --ptt-only   (Pi)
+python -m runtime.run --ptt-only --window   # the live window (default where there is a display)
+python -m runtime.run --ptt-only --web      # the same view at http://<host>:8090/ (default on the headless Pi)
 ```
+
+The view shows the camera with the reach drawn on it (target box, hand point, arrow) and, beside it, what was
+heard and said, the task and step, the command words with their pulse rate, dx/dy/dz and distance, timings, the
+glove's motors blinking as they are driven, and the frame sent with the last utterance. The window can be
+resized; `--layout overlay` draws the panel on top of the camera instead.
 
 Loads `runtime/glance.env` (copy `runtime/glance.env.example`: server URLs, tokens, `GEMINI_API_KEY`), uses
 the hardware glove if one is plugged in (fake otherwise), runs `runtime.selftest` and stops on any FAIL

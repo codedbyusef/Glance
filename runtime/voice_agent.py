@@ -250,54 +250,111 @@ class App:
 
 # ------------------------------------------------------------------ the live view
 
+SIDE_W = 430  # side panel width (layout "side")
+LAYOUTS = ("side", "overlay")
+
+
+def _wrap(lines: list, width: int) -> list:
+    """Wrap each (text or (text, color)) line to `width` characters, keeping its color."""
+    import textwrap
+
+    out = []
+    for ln in lines:
+        text, color = (ln, None) if isinstance(ln, str) else ln
+        parts = textwrap.wrap(" ".join(text.split()), width) or [""]
+        out += [p if color is None else (p, color) for p in parts[:3]]
+    return out
+
+
 class Overlay:
-    def __init__(self, app: App, width: int, mode_label: str):
+    """The live view. layout "side": the camera on the left, untouched except for the reach markers, and a
+    panel on the right with the status, the glove and the frame sent with the last utterance.
+    layout "overlay": everything drawn on top of the camera image (narrower window)."""
+
+    def __init__(self, app: App, width: int, mode_label: str, layout: str = "side"):
+        if layout not in LAYOUTS:
+            raise ValueError(f"layout must be one of {LAYOUTS}")
         self.app = app
         self.width = width
         self.mode_label = mode_label
+        self.layout = layout
         self.fps = FpsCounter()
         self._inset_id: str | None = None
         self._inset_img = None
 
-    def render(self):
+    def _lines(self, st: dict, snap, fps: float) -> list:
         app = self.app
-        image = app.camera.newest_bgr() if app.camera is not None else None
-        canvas = fit_width(image, self.width) if image is not None else blank(self.width, round(self.width * 9 / 16))
-        snap = app.reach.snapshot() if hasattr(app.reach, "snapshot") else None
-        if snap is not None:
-            draw_reach(canvas, snap, (640, 480))
-        st = app.status.get()
-        fps = self.fps.tick()
         timing = "  ".join(f"{k} {v:.0f}" for k, v in app.timings.items()) or "-"
         reach = app.reach.describe()
         lines = [
             f"view {fps:.0f} fps | camera {app.camera.fps if app.camera else 0:.0f} fps | {self.mode_label}",
             f"ms: {timing}",
             (f"listening: {st['listen']}", (120, 255, 120)),
-            _clip(f"heard: {st['transcript']}"),
-            _clip(f"said: {st['spoken']}"),
-            _clip(f"task: {st['task']}"),
-            _clip(f"step: {st['step']}") if st["step"] else "step: -",
+            f"heard: {st['transcript']}",
+            f"said: {st['spoken']}",
+            f"task: {st['task']}",
+            f"step: {st['step']}" if st["step"] else "step: -",
             (reach, (0, 220, 255) if reach.startswith("REACH") else (235, 235, 235)),
         ]
         if snap is not None and snap["session_id"] is not None:
             lines += guidance_lines(snap)
         if snap is not None and snap["error"]:
             lines.append((snap["error"], (80, 80, 255)))
-        lines += [(e, (80, 80, 255)) for e in st["errors"]]
-        text_panel(canvas, lines, (8, 8), scale=0.5)
+        return lines + [(e, (80, 80, 255)) for e in st["errors"]]
+
+    def _sent_image(self, st: dict):
         frame = st["sent_frame"]
-        if frame is not None and frame.image:
-            if frame.id != self._inset_id:
-                self._inset_img = cv2.imdecode(np.frombuffer(frame.image, np.uint8), cv2.IMREAD_COLOR)
-                self._inset_id = frame.id
-            if self._inset_img is not None:
-                inset(canvas, self._inset_img, "br", width=220, label=f"sent: {frame.id}")
+        if frame is None or not frame.image:
+            return None, None
+        if frame.id != self._inset_id:
+            self._inset_img = cv2.imdecode(np.frombuffer(frame.image, np.uint8), cv2.IMREAD_COLOR)
+            self._inset_id = frame.id
+        return self._inset_img, frame.id
+
+    def render(self):
+        app = self.app
+        image = app.camera.newest_bgr() if app.camera is not None else None
+        video = fit_width(image, self.width) if image is not None else blank(self.width, round(self.width * 9 / 16))
+        snap = app.reach.snapshot() if hasattr(app.reach, "snapshot") else None
+        if snap is not None:
+            draw_reach(video, snap, (640, 480))
+        st = app.status.get()
+        lines = self._lines(st, snap, self.fps.tick())
+        sent, sent_id = self._sent_image(st)
+        keys = "m = table/wall" if snap is not None else "s l h n t k = reach result"
+        keys_line = f"keys: {keys} | Enter = talk | q = quit"
+        if self.layout == "overlay":
+            return self._render_overlay(video, lines, sent, sent_id, keys_line)
+        return self._render_side(video, lines, sent, sent_id, keys_line)
+
+    def _render_overlay(self, canvas, lines, sent, sent_id, keys_line):
+        text_panel(canvas, [ln if isinstance(ln, tuple) else _clip(ln) for ln in lines], (8, 8), scale=0.5)
+        if sent is not None:
+            inset(canvas, sent, "br", width=220, label=f"sent: {sent_id}")
         h = canvas.shape[0]
         if h > 230:
-            app.glove.draw(canvas, (8, h - 230))
-        keys = "m = table/wall" if snap is not None else "s l h n t k = reach result"
-        text_panel(canvas, [f"keys: {keys} | Enter = talk | q = quit"], (170, h - 30), scale=0.42)
+            self.app.glove.draw(canvas, (8, h - 230))
+        text_panel(canvas, [keys_line], (170, h - 30), scale=0.42)
+        return canvas
+
+    def _render_side(self, video, lines, sent, sent_id, keys_line):
+        vh, vw = video.shape[:2]
+        wrapped = _wrap(lines, 54)
+        text_h = 22 * len(wrapped) + 16
+        sent_h = round((SIDE_W - 200) * 3 / 4) + 30 if sent is not None else 0
+        h = max(vh, text_h + 200 + 40)
+        canvas = np.full((h, vw + SIDE_W, 3), (24, 24, 24), np.uint8)
+        canvas[:vh, :vw] = video
+        x = vw + 8
+        y = text_panel(canvas, wrapped, (x, 8), scale=0.5, width=SIDE_W - 16) + 8
+        self.app.glove.draw(canvas, (x, y))  # 150 x 190
+        if sent is not None and y + sent_h <= h:
+            small = fit_width(sent, SIDE_W - 200)
+            sx, sy = x + 165, y + 22
+            if sy + small.shape[0] <= h:
+                canvas[sy:sy + small.shape[0], sx:sx + small.shape[1]] = small
+                cv2.putText(canvas, f"sent: {sent_id}", (sx, y + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1)
+        text_panel(canvas, [keys_line], (x, h - 30), scale=0.42)
         return canvas
 
 
@@ -314,6 +371,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--reach", choices=("keys", "real"), default="keys",
                         help="keys: simulated with keys (Step 1); real: ReachAPI + guidance + glove (Step 3)")
     parser.add_argument("--mode", choices=("table", "wall"), default="table", help="guidance axis mode (--reach real)")
+    parser.add_argument("--layout", choices=LAYOUTS, default="side",
+                        help="side: camera left, info + glove panel right (default); overlay: drawn on the camera")
     parser.add_argument("--glove", choices=("fake", "hardware"), help="default: glove.kind in runtime/config")
     parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port, auto = detect)")
     args = parser.parse_args(argv)
@@ -372,7 +431,7 @@ def main(argv: list[str] | None = None) -> None:
               turnlog=TurnLog.daily(AGENT_ROOT / agent_cfg.log_dir), mic_factory=mic_factory, loop=loop,
               haptic_factory=haptic_factory)
     view = View(args.view, title="glance voice agent", port=rt["view"]["web_port"])
-    overlay = Overlay(app, rt["view"]["width"], mode_label)
+    overlay = Overlay(app, rt["view"]["width"], mode_label, args.layout)
     quit_flag = threading.Event()
 
     def on_key(k: str) -> None:
