@@ -78,7 +78,7 @@ class FakeGlove:
 
     channels: the motors the real glove has; the others are drawn crossed out (they get nothing on hardware)."""
 
-    def __init__(self, clock=time.monotonic, channels=None, label: str = "glove (fake)"):
+    def __init__(self, clock=time.monotonic, channels=None, label: str = "glove"):
         self.clock = clock
         self.channels = set(channels) if channels is not None else set(range(8))
         self.label = label
