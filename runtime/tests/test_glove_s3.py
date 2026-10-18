@@ -148,14 +148,24 @@ def test_make_glove_opens_the_link_for_the_firmware(monkeypatch, firmware, link_
 
 def test_pick_glove(monkeypatch):
     rt = runtime_config.load(local=os.devnull)
+    ok = lambda port, rt: None  # noqa: E731  (the port opens)
+
+    def busy(port, rt):
+        raise RuntimeError(f"{port} is busy: another program has it open")
+
     monkeypatch.setattr("runtime.glove_out.find_glove_port", lambda ports=None: "/dev/ttyACM0")
-    assert run_mod.pick_glove(None, None, rt) == ("hardware", "/dev/ttyACM0")   # plugged in -> hardware
-    assert run_mod.pick_glove("fake", None, rt) == ("fake", None)
-    assert run_mod.pick_glove(None, "COM9", rt) == ("hardware", "COM9")
+    assert run_mod.pick_glove(None, None, rt, probe=ok) == ("hardware", "/dev/ttyACM0")   # plugged in -> hardware
+    assert run_mod.pick_glove("fake", None, rt, probe=ok) == ("fake", None)
+    assert run_mod.pick_glove(None, "COM9", rt, probe=ok) == ("hardware", "COM9")
+    # busy or unplugged: warn and carry on with the fake glove, unless the glove is required
+    assert run_mod.pick_glove("hardware", "COM6", rt, probe=busy) == ("fake", None)
+    with pytest.raises(SystemExit, match="busy"):
+        run_mod.pick_glove("hardware", "COM6", rt, require=True, probe=busy)
     monkeypatch.setattr("runtime.glove_out.find_glove_port", lambda ports=None: None)
-    assert run_mod.pick_glove(None, None, rt) == ("fake", None)                  # nothing plugged in -> fake
+    assert run_mod.pick_glove(None, None, rt, probe=ok) == ("fake", None)                  # nothing plugged in -> fake
+    assert run_mod.pick_glove("hardware", None, rt, probe=ok) == ("fake", None)
     with pytest.raises(SystemExit, match="no glove port"):
-        run_mod.pick_glove("hardware", None, rt)
+        run_mod.pick_glove("hardware", None, rt, require=True, probe=ok)
 
 
 def test_load_env_sets_missing_names_only(tmp_path, monkeypatch):
@@ -167,3 +177,42 @@ def test_load_env_sets_missing_names_only(tmp_path, monkeypatch):
     assert os.environ["GLANCE_TEST_A"] == "one" and os.environ["GLANCE_TEST_B"] == "shell wins"
     monkeypatch.delenv("GLANCE_TEST_A")
     assert runtime_config.load_env(tmp_path / "missing.env") == []
+
+
+# ------------------------------------------------------------------ opening the port
+
+@pytest.mark.parametrize("error,expect", [
+    ("could not open port 'COM6': PermissionError(13, 'Access is denied.', None, 5)", "is busy"),
+    ("could not open port 'COM6': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+     "does not exist right now"),
+    ("[Errno 2] could not open port /dev/ttyACM0: [Errno 2] No such file or directory: '/dev/ttyACM0'",
+     "does not exist right now"),
+])
+def test_open_link_retries_then_explains(monkeypatch, error, expect):
+    from runtime.glove_out import GlovePortError, open_link
+
+    calls = []
+
+    def failing_link(port, channels=None):
+        calls.append(port)
+        raise OSError(error)
+
+    monkeypatch.setattr("haptics.link.GloveLink", failing_link)
+    with pytest.raises(GlovePortError, match=expect):
+        open_link("COM6", protocol.S3_CHANNELS, attempts=3, sleep=lambda s: None)
+    assert calls == ["COM6"] * 3
+
+
+def test_open_link_survives_a_brief_reset(monkeypatch):
+    from runtime.glove_out import open_link
+
+    tries = []
+
+    def flaky_link(port, channels=None):
+        tries.append(port)
+        if len(tries) < 2:
+            raise OSError("could not open port 'COM6': PermissionError(13, 'Access is denied.', None, 5)")
+        return DryLink(channels)
+
+    monkeypatch.setattr("haptics.link.GloveLink", flaky_link)
+    assert isinstance(open_link("COM6", protocol.S3_CHANNELS, sleep=lambda s: None), DryLink) and len(tries) == 2

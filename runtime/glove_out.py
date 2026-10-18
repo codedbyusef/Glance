@@ -145,9 +145,7 @@ class HardwareGlove:
                 raise ValueError("no glove serial port found: plug the glove in, or set glove.port in "
                                  "runtime/config.local.yaml / pass --glove-port (e.g. /dev/ttyACM0, COM5). "
                                  "python -m runtime.glove ports lists them")
-            from haptics.link import GloveLink
-
-            link = GloveLink(port, channels=None if firmware == "ino8" else self.channels)
+            link = open_link(port, None if firmware == "ino8" else self.channels)
         self.port = port
         self.link = link
         self.on_level = int(on_level)
@@ -170,6 +168,37 @@ class HardwareGlove:
         """What the firmware printed (GLANCE GLOVE READY, TEST lines)."""
         read = getattr(self.link, "read_lines", None)
         return read() if read is not None else []
+
+
+class GlovePortError(RuntimeError):
+    pass
+
+
+def open_link(port: str, channels, attempts: int = 3, wait_s: float = 1.5, sleep=time.sleep):
+    """GloveLink on `port`, retrying briefly (CircuitPython drops and re-adds its USB port for a moment after a file
+    on CIRCUITPY is saved). Errors say what they usually mean: busy (another program has the port; Windows gives
+    a serial port to one process at a time) or missing (unplugged, or the board is in safe mode)."""
+    from haptics.link import GloveLink
+
+    last = None
+    for i in range(attempts):
+        try:
+            return GloveLink(port, channels=channels)
+        except Exception as e:  # serial.SerialException
+            last = e
+            if i + 1 < attempts:
+                sleep(wait_s)
+    text = str(last)
+    if "Access is denied" in text or "PermissionError" in text or "Device or resource busy" in text:
+        hint = (f"{port} is busy: another program has it open (another Glance run, a VS Code/Mu/Thonny serial "
+                f"monitor, firmware/glove/send_test.py). Close it and retry. On Linux, 'Permission denied' instead "
+                f"means you are not in the dialout group yet (log out and back in after install_pi.sh).")
+    elif "FileNotFoundError" in text or ("could not open port" in text and "No such file" in text):
+        hint = (f"{port} does not exist right now: the glove is unplugged or not running (check that CIRCUITPY "
+                f"shows up and the board is not in safe mode). python -m runtime.glove ports lists the ports.")
+    else:
+        hint = f"could not open {port}"
+    raise GlovePortError(f"{hint} ({text})") from last
 
 
 # USB vendor ids: Adafruit (CircuitPython on the Feather ESP32-S3) and Espressif (bare ESP32-S3 / Arduino).
