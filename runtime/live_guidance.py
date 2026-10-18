@@ -82,6 +82,35 @@ class FrameLog:
             return "\n".join(lines)
 
 
+def frame_record(msg: dict, state: GuidanceState, capture_age: Optional[float]) -> dict:
+    """One JSONL line for a progress frame: per-stage ms (capture, encode, network, server stages, guidance)
+    and what the guidance made of it."""
+    t = msg.get("timings_ms", {})
+    client = msg.get("client", {})
+    ms = {"capture": capture_age, "encode": client.get("encode_ms"),
+          "network": client.get("network_ms"), "server": msg.get("server_ms")}
+    ms.update({name: t[key] for key, name in SERVER_STAGES.items() if key in t})
+    ms["guidance"] = round(state.ms, 3)
+    ms["round_trip"] = client.get("round_trip_ms")
+    return {
+        "t": round(time.time(), 3), "session_id": msg.get("session_id"), "frame_id": msg.get("frame_id"),
+        "ms": ms, "mode": state.mode, "words": state.words, "wrist_hz": round(state.wrist_hz, 2),
+        "status": state.status, "dx": state.dx, "dy": state.dy, "dz": state.dz, "units": state.units,
+        "touching": state.touching, "frozen": state.frozen,
+        "target_box": msg.get("target_box"), "hand_point": msg.get("hand_point"),
+        "depth": msg.get("depth"),
+    }
+
+
+def log_frame(log: FrameLog, timings: Timings, msg: dict, state: GuidanceState,
+              capture_age: Optional[float]) -> None:
+    rec = frame_record(msg, state, capture_age)
+    for k, v in rec["ms"].items():
+        if v is not None:
+            timings.set(k, v)
+    log.write(rec)
+
+
 class ReachLoop:
     """One reach at a time. Progress -> guidance -> glove; every end, pause, restart or error -> all-off.
 
@@ -163,7 +192,7 @@ class ReachLoop:
                 state = self.guidance.update(msg)
                 self.progress, self.state = msg, state
             self.glove.apply(state.cmd)
-            self._log(msg, state)
+            log_frame(self.log, self.timings, msg, state, self.capture_age())
         except Exception as e:  # never leave a motor on after a bug
             self.glove.all_off()
             with self._lock:
@@ -174,26 +203,6 @@ class ReachLoop:
         with self._lock:
             if result.session_id == self.session_id:
                 self.result, self.session_id = result, None
-
-    def _log(self, msg: dict, state: GuidanceState) -> None:
-        t = msg.get("timings_ms", {})
-        client = msg.get("client", {})
-        ms = {"capture": self.capture_age(), "encode": client.get("encode_ms"),
-              "network": client.get("network_ms"), "server": msg.get("server_ms")}
-        ms.update({name: t[key] for key, name in SERVER_STAGES.items() if key in t})
-        ms["guidance"] = round(state.ms, 3)
-        ms["round_trip"] = client.get("round_trip_ms")
-        for k, v in ms.items():
-            if v is not None:
-                self.timings.set(k, v)
-        self.log.write({
-            "t": round(time.time(), 3), "session_id": msg.get("session_id"), "frame_id": msg.get("frame_id"),
-            "ms": ms, "mode": state.mode, "words": state.words, "wrist_hz": round(state.wrist_hz, 2),
-            "status": state.status, "dx": state.dx, "dy": state.dy, "dz": state.dz, "units": state.units,
-            "touching": state.touching, "frozen": state.frozen,
-            "target_box": msg.get("target_box"), "hand_point": msg.get("hand_point"),
-            "depth": msg.get("depth"),
-        })
 
     def snapshot(self) -> dict:
         with self._lock:

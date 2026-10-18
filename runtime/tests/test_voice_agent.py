@@ -184,6 +184,59 @@ def test_ptt_only_ignores_voice_and_wake_word_and_ptt_barges_in(rigs):
     assert 'intercepted="halt"' in model_inputs(model)[1]
 
 
+def test_real_reach_path_start_progress_result_through_the_controller(rigs):
+    """--reach real wiring: say_first plays, then ReachHaptic starts the ReachAPI reach; progress drives the
+    glove; the success result reaches the controller through dispatch and the model gets its turn."""
+    from runtime.guidance import Guidance
+    from runtime.reach_haptic import ReachHaptic
+    from runtime.tests.test_reach_haptic import FakeReachAPI, progress, result
+
+    holder = {}
+
+    def haptic_factory(dispatch, on_result):
+        holder["h"] = ReachHaptic(FakeReachAPI, dispatch, on_result, Guidance("table"), holder["glove"])
+        return holder["h"]
+
+    model = ScriptedModel(
+        respond(call("start_task", goal="get the can"),
+                call("reach", target="red soda can", refer="the red can on the table",
+                     say_first="Bring your right hand out.", notes="Reach 1.")),
+        respond(call("speak", text="Your hand should be on the can. Say yes if you have it.", expect="answer",
+                     notes="Touch check.")),
+    )
+    from runtime.glove_out import FakeGlove
+    holder["glove"] = FakeGlove()
+
+    class RealReachRig(Rig):
+        def __init__(self):
+            import asyncio
+            loop = asyncio.new_event_loop()
+            self.output = FakeOutput(realtime=True)
+            self.player = Player(FakeSynth(), self.output, dispatch=loop.call_soon_threadsafe, log=null_log())
+            self.camera = FakeCamera()
+            self.model = model
+            self.app = App(AgentConfig(assistant_name="Glance"), model, self.player, self.camera,
+                           glove=holder["glove"], tick_s=0.02, loop=loop, haptic_factory=haptic_factory)
+            self.mic = None
+            self.player.start()
+            self.app.start()
+
+    r = RealReachRig()
+    rigs.append(r)
+    r.app.type_utterance("get me the can")
+    h = holder["h"]
+    r.wait(lambda: h.session_id is not None, what="reach started after say_first")
+    assert h.api.calls[0] == ("start", "red soda can", "the red can on the table")
+    assert (s := r.step()).type == "reach" and s.state == "running" and s.session_id == h.session_id
+    sid = h.session_id
+    h.api.on_progress(progress(sid))
+    assert holder["glove"].command.on  # guidance drives the glove
+    h.api.on_result(result(sid, "success"))
+    assert holder["glove"].command.on == frozenset()
+    r.wait(lambda: (s := r.step()) is not None and s.type == "speak" and s.expect == "answer", what="touch check")
+    assert '"status": "success"' in model_inputs(model)[1]
+
+
 def test_overlay_renders_without_a_camera_image(rigs):
     from runtime.voice_agent import Overlay
 

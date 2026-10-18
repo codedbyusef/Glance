@@ -1,13 +1,18 @@
-"""Step 1: talk to the real agent with the real mic, wake word, STT and TTS, using live camera frames.
-The reach is simulated with keys (KeyboardReach).
+"""Talk to the real agent with the real mic, wake word, STT and TTS, using live camera frames.
 
     python -m runtime.voice_agent                       # wake word "hey glance" (needs headphones)
     python -m runtime.voice_agent --ptt-only            # no headphones: Enter starts and stops each utterance
     python -m runtime.voice_agent --typed               # type what you say; real TTS and camera
     python -m runtime.voice_agent --view web            # MJPEG at http://<host>:8090/, keys in the terminal
+    python -m runtime.voice_agent --reach real          # Step 3: real reaches on the vision server (GLANCE_VISION_URL)
+
+--reach keys (Step 1, the default) simulates the reach with keys; --reach real drives ReachAPI, guidance and the
+glove (fake by default).
 
 Keys (window, or a letter + Enter in the terminal):
-    s l h n t k   end the running reach: success, target_lost, hand_lost, target_not_found, timeout, stale_link
+    s l h n t k   (--reach keys) end the running reach: success, target_lost, hand_lost, target_not_found,
+                  timeout, stale_link
+    m             (--reach real) toggle table / wall guidance
     Enter         push-to-talk (start, then stop)
     q             quit
 
@@ -41,9 +46,10 @@ from . import config as runtime_config
 from .glove_out import FakeGlove
 from .keyboard_reach import KEY_STATUS, KeyboardReach
 from .keys import StdinRouter, TogglePtt
+from .live_guidance import draw_reach, guidance_lines
 from .view import FpsCounter, Timings, View, blank, fit_width, inset, text_panel
 
-KEYS = set(KEY_STATUS) | {"q"}
+KEYS = set(KEY_STATUS) | {"q", "m"}
 
 
 def _clip(text: str, n: int = 95) -> str:
@@ -140,7 +146,7 @@ class App:
     def __init__(self, agent_cfg: AgentConfig, model, player, camera, *, glove=None, status: Status | None = None,
                  timings: Timings | None = None, turnlog: TurnLog | None = None,
                  mic_factory: Callable | None = None, tick_s: float = 0.1,
-                 loop: asyncio.AbstractEventLoop | None = None):
+                 loop: asyncio.AbstractEventLoop | None = None, haptic_factory: Callable | None = None):
         """loop: the agent's event loop (not running yet); the Player's dispatch must be its call_soon_threadsafe."""
         self.status = status or Status()
         self.timings = timings or Timings()
@@ -151,7 +157,10 @@ class App:
         self.tick_s = tick_s
         self.loop = loop or asyncio.new_event_loop()
         self.dispatch = self.loop.call_soon_threadsafe
-        self.reach = KeyboardReach(self.dispatch, lambda r: self.controller.on_haptic_result(r), camera, self.glove)
+        on_result = lambda r: self.controller.on_haptic_result(r)  # noqa: E731  (runs on the loop via dispatch)
+        # haptic_factory(dispatch, on_result) -> a HapticLoop (ReachHaptic for --reach real); default: keys
+        self.reach = haptic_factory(self.dispatch, on_result) if haptic_factory is not None \
+            else KeyboardReach(self.dispatch, on_result, camera, self.glove)
         self.controller = Controller(agent_cfg, model, player, self.reach, camera, RealClock(),
                                      build_system_prompt(agent_cfg), self.turnlog)
         self.sink = SinkTap(self.controller, self.status)
@@ -173,7 +182,8 @@ class App:
     def stop(self) -> None:
         """Every exit path: glove off, mic and player closed, loop stopped."""
         self.glove.all_off()
-        for name, close in (("mic", getattr(self.mic, "close", None)), ("player", getattr(self.player, "close", None))):
+        for name, close in (("mic", getattr(self.mic, "close", None)), ("player", getattr(self.player, "close", None)),
+                            ("reach", getattr(self.reach, "close", None))):
             if close is not None:
                 try:
                     close()
@@ -253,6 +263,9 @@ class Overlay:
         app = self.app
         image = app.camera.newest_bgr() if app.camera is not None else None
         canvas = fit_width(image, self.width) if image is not None else blank(self.width, round(self.width * 9 / 16))
+        snap = app.reach.snapshot() if hasattr(app.reach, "snapshot") else None
+        if snap is not None:
+            draw_reach(canvas, snap, (640, 480))
         st = app.status.get()
         fps = self.fps.tick()
         timing = "  ".join(f"{k} {v:.0f}" for k, v in app.timings.items()) or "-"
@@ -266,7 +279,12 @@ class Overlay:
             _clip(f"task: {st['task']}"),
             _clip(f"step: {st['step']}") if st["step"] else "step: -",
             (reach, (0, 220, 255) if reach.startswith("REACH") else (235, 235, 235)),
-        ] + [(e, (80, 80, 255)) for e in st["errors"]]
+        ]
+        if snap is not None and snap["session_id"] is not None:
+            lines += guidance_lines(snap)
+        if snap is not None and snap["error"]:
+            lines.append((snap["error"], (80, 80, 255)))
+        lines += [(e, (80, 80, 255)) for e in st["errors"]]
         text_panel(canvas, lines, (8, 8), scale=0.5)
         frame = st["sent_frame"]
         if frame is not None and frame.image:
@@ -278,8 +296,8 @@ class Overlay:
         h = canvas.shape[0]
         if h > 230:
             app.glove.draw(canvas, (8, h - 230))
-        text_panel(canvas, ["keys: s l h n t k = reach result | Enter = talk | q = quit"],
-                   (170, h - 30), scale=0.42)
+        keys = "m = table/wall" if snap is not None else "s l h n t k = reach result"
+        text_panel(canvas, [f"keys: {keys} | Enter = talk | q = quit"], (170, h - 30), scale=0.42)
         return canvas
 
 
@@ -293,7 +311,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="no wake word and no open-state VAD: Enter starts and stops each utterance (no headphones)")
     mode.add_argument("--typed", action="store_true", help="type utterances in the terminal; real TTS and camera")
     parser.add_argument("--camera", help="camera index or video path (default: runtime/config.yaml)")
-    parser.add_argument("--reach", choices=("keys",), default="keys", help="keys: simulated reach (Step 1)")
+    parser.add_argument("--reach", choices=("keys", "real"), default="keys",
+                        help="keys: simulated with keys (Step 1); real: ReachAPI + guidance + glove (Step 3)")
+    parser.add_argument("--mode", choices=("table", "wall"), default="table", help="guidance axis mode (--reach real)")
     args = parser.parse_args(argv)
 
     from audio import config as audio_config
@@ -327,8 +347,27 @@ def main(argv: list[str] | None = None) -> None:
             return build_mic(audio_cfg, sink, player=player, dispatch=dispatch, frame_source=camera.latest_frame,
                              task_active=task_active, log=log, ptt=ptt)
 
-    app = App(agent_cfg, model, player, camera, status=status, timings=timings,
-              turnlog=TurnLog.daily(AGENT_ROOT / agent_cfg.log_dir), mic_factory=mic_factory, loop=loop)
+    glove = FakeGlove()
+    haptic_factory = None
+    frame_log = None
+    if args.reach == "real":
+        from object_detection.reach_api import ReachAPI
+
+        from .guidance import Guidance
+        from .live_guidance import LOG_DIR, FrameLog, log_frame
+        from .reach_haptic import ReachHaptic
+
+        frame_log = FrameLog(LOG_DIR / f"voice-reach-{time.strftime('%Y%m%d-%H%M%S')}.jsonl")
+        guidance = Guidance.from_config(args.mode)
+
+        def haptic_factory(dispatch, on_result):
+            return ReachHaptic(lambda res_cb, prog_cb: ReachAPI(res_cb, camera.newest_bgr, prog_cb), dispatch,
+                               on_result, guidance, glove,
+                               on_frame=lambda msg, st: log_frame(frame_log, timings, msg, st, None))
+
+    app = App(agent_cfg, model, player, camera, glove=glove, status=status, timings=timings,
+              turnlog=TurnLog.daily(AGENT_ROOT / agent_cfg.log_dir), mic_factory=mic_factory, loop=loop,
+              haptic_factory=haptic_factory)
     view = View(args.view, title="glance voice agent", port=rt["view"]["web_port"])
     overlay = Overlay(app, rt["view"]["width"], mode_label)
     quit_flag = threading.Event()
@@ -339,7 +378,10 @@ def main(argv: list[str] | None = None) -> None:
         elif k == "\n":
             if not args.typed:
                 print("[ptt] talk now, Enter to stop" if ptt.toggle() else "[ptt] released", flush=True)
-        else:
+        elif k == "m":
+            if hasattr(app.reach, "toggle_mode"):
+                print(f"guidance mode: {app.reach.toggle_mode()}", flush=True)
+        elif hasattr(app.reach, "key"):
             app.reach.key(k)
 
     try:
@@ -370,6 +412,8 @@ def main(argv: list[str] | None = None) -> None:
         app.stop()
         camera.stop()
         view.close()
+        if frame_log is not None:
+            print(frame_log.summary(), flush=True)
         print("stopped. Latency summary: python -m runtime.latency", flush=True)
 
 

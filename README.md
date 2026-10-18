@@ -119,6 +119,29 @@ $env:GLANCE_VISION_URL = "ws://100.112.104.87:8000/ws"; $env:GLANCE_TOKEN = "<to
 The depth live test and benchmark (`python -m depth_estimation.scripts.test_depth_live`, `...benchmark_depth`)
 need torch for the real model, so run them in `.venv-vision` (or with `GLANCE_FAKE_MODELS=1`).
 
+## The full system (agent + voice + real reaches)
+
+1. **GPU host:** start the STT server (port 8001) and the vision server (port 8000) as above, each in its own
+   venv, with the same tokens the laptop will use.
+2. **Laptop, repo root:**
+
+   ```powershell
+   $env:GLANCE_STT_URL = "http://100.112.104.87:8001"; $env:GLANCE_STT_TOKEN = "<token>"
+   $env:GLANCE_VISION_URL = "ws://100.112.104.87:8000/ws"; $env:GLANCE_TOKEN = "<token>"
+   .venv\Scripts\python -m audio.cli stt-check                     # STT reachable
+   .venv\Scripts\python -m object_detection.client --health        # vision reachable, models loaded, depth on
+   .venv\Scripts\python -m runtime.voice_agent --reach real --ptt-only    # speakers: Enter to talk
+   .venv\Scripts\python -m runtime.voice_agent --reach real              # headphones: "hey glance"
+   ```
+
+   The view shows the camera, what was heard and said, the task and step, the reach (target box, hand point,
+   arrow, command words, dx/dy/dz, distance, touching/frozen) and the fake glove's motors. `m` toggles
+   table/wall guidance, `q` quits. Per-frame reach timings go to `runtime/logs/voice-reach-*.jsonl` and a
+   summary prints on exit; `python -m runtime.latency` gives end of speech to first reply.
+3. **Without the agent** (tune vision, depth and guidance): `python -m runtime.live_guidance --target "red can"`.
+4. **Without a GPU** (wiring only): run the vision server locally with `$env:GLANCE_FAKE_MODELS = "1"` and
+   point `GLANCE_VISION_URL` at `ws://127.0.0.1:8000/ws`.
+
 ## Out of scope for the weekend
 
 3D mapping, hand-rotation compensation, grasping or turning actions, outdoor use, left-hand glove, any
