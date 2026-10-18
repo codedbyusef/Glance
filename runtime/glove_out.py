@@ -2,6 +2,9 @@
 
 Channel indices and names come from haptics/protocol.py. All-off happens on session end, pause, cancel, any
 exception and process exit; callers use all_off() on every one of those paths.
+
+The real glove is the 6-motor ESP32-S3 (firmware/glove/code.py): thumb, index, ring, pinky, back, palm. It has
+no middle-finger and no wrist motor, so the wrist's proximity pulse has nowhere to go on hardware (decision 21).
 """
 from __future__ import annotations
 
@@ -39,6 +42,9 @@ def channel_on(cmd: GloveCommand, ch: int, t: float) -> bool:
     return hz > 0 and (t * hz) % 1.0 < 0.5
 
 
+# The logical channels each firmware has (haptics/protocol.py), in wire order.
+FIRMWARE_CHANNELS = {"s3": protocol.S3_CHANNELS, "ino8": tuple(range(8))}
+
 # Panel layout: a right-hand glove seen from the back, fingers up. (x, y) in a 150 x 170 box.
 _SPOTS = {
     protocol.THUMB: (18, 95), protocol.INDEX: (45, 30), protocol.MIDDLE: (75, 20), protocol.RING: (105, 30),
@@ -51,10 +57,14 @@ _MEANING = {
 
 
 class FakeGlove:
-    """Draws the 8 motors on the live view, blinking at their pulse rates. No hardware."""
+    """Draws the motors on the live view, blinking at their pulse rates. No hardware.
 
-    def __init__(self, clock=time.monotonic):
+    channels: the motors the real glove has; the others are drawn crossed out (they get nothing on hardware)."""
+
+    def __init__(self, clock=time.monotonic, channels=None, label: str = "glove (fake)"):
         self.clock = clock
+        self.channels = set(channels) if channels is not None else set(range(8))
+        self.label = label
         self._lock = threading.Lock()
         self._cmd = OFF
         self.applied = 0  # for tests
@@ -77,35 +87,48 @@ class FakeGlove:
         cmd, t = self.command, self.clock()
         x0, y0 = origin
         cv2.rectangle(img, (x0, y0), (x0 + 150, y0 + 190), (30, 30, 30), -1)
-        cv2.putText(img, "glove (fake)", (x0 + 6, y0 + 186), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+        cv2.putText(img, self.label, (x0 + 6, y0 + 186), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
         for ch, (x, y) in _SPOTS.items():
+            if ch not in self.channels:  # not on this glove: shown, but crossed out
+                cv2.circle(img, (x0 + x, y0 + y), 11, (60, 60, 60), 1)
+                cv2.line(img, (x0 + x - 8, y0 + y - 8), (x0 + x + 8, y0 + y + 8), (60, 60, 60), 1)
+                continue
             on = channel_on(cmd, ch, t)
             color = (0, 220, 255) if on else (90, 90, 90)
             cv2.circle(img, (x0 + x, y0 + y), 11, color, -1 if on else 2)
             cv2.putText(img, _MEANING[ch], (x0 + x - 12, y0 + y + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.33,
                         (0, 0, 0) if on else (200, 200, 200), 1)
         hz = cmd.pulse_hz.get(protocol.WRIST, 0.0)
-        if hz > 0:
+        if hz > 0 and protocol.WRIST in self.channels:
             cv2.putText(img, f"{hz:.1f} Hz", (x0 + 98, y0 + 162), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 220, 255), 1)
 
 
 class HardwareGlove:
     """The real glove over USB serial (Step 4), through haptics.link.GloveLink and the firmware protocol in
-    haptics/protocol.py: a steady channel is sent at on_level, an off channel at 0. GloveLink resends the
-    latest levels at 50 Hz on its own thread and gates the wrist on/off at its pulse rate in software
-    (link.frame_at), so apply() only stores the command and never blocks. The firmware turns every motor
-    off if no frame arrives for 300 ms, so a crashed process can't leave a motor on.
+    haptics/protocol.py: a steady channel is sent at on_level, an off channel at 0, and only the channels the
+    firmware has go on the wire, in its order (firmware "s3": code.py's 6 motors; "ino8": glove.ino's 8).
+    GloveLink resends the latest levels at 50 Hz on its own thread (and gates the wrist on/off at its pulse
+    rate, for gloves that have one), so apply() only stores the command and never blocks. The firmware turns
+    every motor off if no frame arrives for 300 ms, so a crashed process can't leave a motor on.
 
-    Only the wrist can pulse (GloveLink gates only WRIST); any other channel in pulse_hz is sent steady on."""
+    port "auto" (or None) finds the glove with find_glove_port()."""
 
-    def __init__(self, port: str | None = None, on_level: int = 255, link=None):
+    def __init__(self, port: str | None = None, on_level: int = 255, firmware: str = "s3", link=None):
+        if firmware not in FIRMWARE_CHANNELS:
+            raise ValueError(f"glove firmware must be one of {sorted(FIRMWARE_CHANNELS)}, not {firmware!r}")
+        self.firmware = firmware
+        self.channels = FIRMWARE_CHANNELS[firmware]
         if link is None:
+            if not port or port == "auto":
+                port = find_glove_port()
             if not port:
-                raise ValueError("HardwareGlove needs a serial port: set glove.port in runtime/config.local.yaml "
-                                 "or pass --glove-port (e.g. COM5, /dev/ttyUSB0)")
+                raise ValueError("no glove serial port found: plug the glove in, or set glove.port in "
+                                 "runtime/config.local.yaml / pass --glove-port (e.g. /dev/ttyACM0, COM5). "
+                                 "python -m runtime.glove ports lists them")
             from haptics.link import GloveLink
 
-            link = GloveLink(port)
+            link = GloveLink(port, channels=None if firmware == "ino8" else self.channels)
+        self.port = port
         self.link = link
         self.on_level = int(on_level)
         self.link.start()
@@ -121,6 +144,34 @@ class HardwareGlove:
 
     def close(self) -> None:
         self.link.stop()  # sends all-off, closes the port
+
+    def read_lines(self) -> list[str]:
+        """What the firmware printed (GLANCE GLOVE READY, TEST lines)."""
+        read = getattr(self.link, "read_lines", None)
+        return read() if read is not None else []
+
+
+# USB vendor ids: Adafruit (CircuitPython on the Feather ESP32-S3) and Espressif (bare ESP32-S3 / Arduino).
+GLOVE_USB_VIDS = (0x239A, 0x303A)
+
+
+def find_glove_port(ports=None) -> str | None:
+    """The glove's serial port: the first port from Adafruit/Espressif, or whose description names
+    CircuitPython or an ESP32. ports: serial.tools.list_ports.comports() (injected in tests)."""
+    if ports is None:
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            return None
+        ports = list_ports.comports()
+    for p in ports:
+        if getattr(p, "vid", None) in GLOVE_USB_VIDS:
+            return p.device
+    for p in ports:
+        text = f"{getattr(p, 'description', '')} {getattr(p, 'manufacturer', '')}".lower()
+        if "circuitpython" in text or "esp32" in text:
+            return p.device
+    return None
 
 
 class TeeGlove:
@@ -150,10 +201,18 @@ class TeeGlove:
                 return
 
 
-def make_glove(kind: str, port: str | None = None, on_level: int = 255):
-    """The live scripts' glove: fake -> FakeGlove; hardware -> HardwareGlove mirrored on a FakeGlove panel."""
+def make_glove(kind: str, port: str | None = None, on_level: int = 255, firmware: str = "s3"):
+    """The live scripts' glove: fake -> FakeGlove; hardware -> HardwareGlove mirrored on a FakeGlove panel
+    that crosses out the motors this glove doesn't have."""
     if kind == "fake":
         return FakeGlove()
     if kind == "hardware":
-        return TeeGlove(HardwareGlove(port, on_level), FakeGlove())
+        hw = HardwareGlove(port, on_level, firmware)
+        return TeeGlove(hw, FakeGlove(channels=hw.channels, label=f"glove ({firmware}, {hw.port})"))
     raise ValueError(f"glove kind must be fake or hardware, not {kind!r}")
+
+
+def glove_from_config(cfg: dict, kind: str | None = None, port: str | None = None):
+    """make_glove from runtime config["glove"], with optional --glove / --glove-port overrides."""
+    g = cfg["glove"]
+    return make_glove(kind or g["kind"], port or g["port"], g["on_level"], g["firmware"])

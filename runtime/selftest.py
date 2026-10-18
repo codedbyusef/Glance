@@ -116,19 +116,22 @@ def check_vision() -> None:
         api.close()
 
 
-def check_glove(kind: str, port, on_level: int) -> None:
+def check_glove(kind: str, port, on_level: int, firmware: str = "s3") -> None:
     from .glove_out import OFF, make_glove
 
     if kind == "fake":
         report("glove", "PASS", "fake glove (drawn on the live view)")
         return
     try:
-        glove = make_glove(kind, port, on_level)
+        glove = make_glove(kind, port, on_level, firmware)
+        hw = glove.outputs[0]
         glove.apply(OFF)
         glove.all_off()
+        said = hw.read_lines()
         glove.close()
-        report("glove", "PASS", f"hardware on {port}: port opened, all-off sent "
-                                f"(feel each motor with python -m runtime.glove_check)")
+        report("glove", "PASS", f"hardware ({firmware}) on {hw.port}: port opened, all-off sent"
+                                f"{'; firmware said ' + repr(said[-1]) if said else ''} "
+                                f"(feel each motor with python -m runtime.glove test)")
     except Exception as e:
         report("glove", "FAIL", f"hardware on {port}: {e!r}")
 
@@ -154,13 +157,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--glove", choices=("fake", "hardware"), help="default: glove.kind in runtime/config")
     parser.add_argument("--glove-port")
     args = parser.parse_args(argv)
+    runtime_config.load_env()  # runtime/glance.env, if there is one
+    from object_detection.common import load_env_file
+
+    load_env_file()  # object_detection/.env too (the vision client reads it), so the env check agrees with it
     rt = runtime_config.load()
 
     check_env()
     check_camera(rt, args.camera)
     check_stt()
     check_vision()
-    check_glove(args.glove or rt["glove"]["kind"], args.glove_port or rt["glove"]["port"], rt["glove"]["on_level"])
+    check_glove(args.glove or rt["glove"]["kind"], args.glove_port or rt["glove"]["port"], rt["glove"]["on_level"],
+                rt["glove"]["firmware"])
     if not args.skip_audio:
         check_audio()
     fails = [r for r in RESULTS if r[1] == "FAIL"]

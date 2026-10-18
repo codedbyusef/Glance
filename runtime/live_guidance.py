@@ -29,7 +29,7 @@ import cv2
 import numpy as np
 
 from . import config as runtime_config
-from .glove_out import GloveOutput, make_glove
+from .glove_out import GloveOutput, glove_from_config
 from .guidance import Guidance, GuidanceState
 from .keys import StdinRouter
 from .view import FpsCounter, Timings, View, blank, fit_width, text_panel
@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--mode", choices=("table", "wall"), default="table")
     parser.add_argument("--log", help="JSONL path (default runtime/logs/guidance-<time>.jsonl)")
     parser.add_argument("--glove", choices=("fake", "hardware"), help="default: glove.kind in runtime/config")
-    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port)")
+    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port, auto = detect)")
     args = parser.parse_args(argv)
 
     from object_detection.common import load_config as od_config
@@ -276,6 +276,7 @@ def main(argv: list[str] | None = None) -> None:
 
     from .camera import CameraHub
 
+    runtime_config.load_env()  # runtime/glance.env: GLANCE_VISION_URL, GLANCE_TOKEN
     rt = runtime_config.load()
     camera = CameraHub.from_config(rt["camera"], 1024, source=args.camera).start()
     frame_size = (int(od_config()["frame"]["frame_width"]), int(od_config()["frame"]["frame_height"]))
@@ -290,8 +291,7 @@ def main(argv: list[str] | None = None) -> None:
 
     log_path = Path(args.log) if args.log else LOG_DIR / f"guidance-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     log = FrameLog(log_path)
-    glove = make_glove(args.glove or rt["glove"]["kind"], args.glove_port or rt["glove"]["port"],
-                       rt["glove"]["on_level"])
+    glove = glove_from_config(rt, args.glove, args.glove_port)
     timings = Timings()
     loop = ReachLoop(lambda on_result, on_progress: ReachAPI(on_result, frame_source, on_progress),
                      Guidance.from_config(args.mode), glove, log, timings,

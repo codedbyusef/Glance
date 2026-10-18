@@ -18,7 +18,7 @@ def test_local_config_overrides_the_shared_one(tmp_path):
     local.write_text("camera:\n  source: picam\nglove:\n  kind: hardware\n  port: /dev/ttyUSB0\n")
     cfg = runtime_config.load(shared, local)
     assert cfg["camera"]["source"] == "picam" and cfg["camera"]["width"] == 1280
-    assert cfg["glove"] == {"kind": "hardware", "port": "/dev/ttyUSB0", "on_level": 255}
+    assert cfg["glove"] == {"kind": "hardware", "port": "/dev/ttyUSB0", "on_level": 255, "firmware": "s3"}
     local.write_text("glove:\n  prot: COM5\n")
     with pytest.raises(ValueError, match="glove.prot"):
         runtime_config.load(shared, local)

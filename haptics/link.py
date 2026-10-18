@@ -5,6 +5,7 @@ so the wrist motor can pulse smoothly and the firmware's 300 ms failsafe never t
 while the program is alive. Call set() whenever the controller produces a new command.
 
     link = GloveLink("/dev/cu.usbserial-0001")   # or dry_run=True to print instead
+    link = GloveLink("/dev/ttyACM0", channels=S3_CHANNELS)   # the 6-motor ESP32-S3 glove (code.py)
     link.start()
     link.set(cmd.levels, cmd.wrist_hz)
     ...
@@ -13,13 +14,16 @@ while the program is alive. Call set() whenever the controller produces a new co
 import threading
 import time
 
-from haptics.protocol import BAUD, CMD_OFF, CMD_TEST, WRIST, encode_command, encode_frame
+from haptics.protocol import BAUD, CMD_OFF, CMD_TEST, WRIST, encode_command, encode_levels, wire_levels
 
 
 class GloveLink:
-    def __init__(self, port=None, baud=BAUD, rate_hz=50.0, dry_run=False):
+    def __init__(self, port=None, baud=BAUD, rate_hz=50.0, dry_run=False, channels=None):
+        """channels: the logical channels the firmware has, in its wire order (protocol.S3_CHANNELS for
+        code.py); None sends all 8 (glove.ino). set() always takes the 8 logical levels."""
         self.dry_run = dry_run or port is None
         self.rate_hz = rate_hz
+        self.channels = tuple(channels) if channels is not None else None
         self._levels = [0] * 8
         self._wrist_hz = 0.0
         self._lock = threading.Lock()
@@ -59,6 +63,20 @@ class GloveLink:
         if self._serial:
             self._serial.close()
 
+    def read_lines(self):
+        """Text the firmware printed since the last call (READY, TEST lines), without blocking."""
+        if self.dry_run or self._serial is None:
+            return []
+        waiting = self._serial.in_waiting
+        if not waiting:
+            return []
+        text = self._serial.read(waiting).decode(errors="replace")
+        return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+    def wire_frame_at(self, t):
+        """The bytes sent at time t: frame_at() reduced to the firmware's channels."""
+        return encode_levels(wire_levels(self.frame_at(t), self.channels))
+
     def frame_at(self, t):
         """Levels actually sent at time t (wrist gated on/off at wrist_hz, 50% duty)."""
         with self._lock:
@@ -72,7 +90,7 @@ class GloveLink:
         period = 1.0 / self.rate_hz
         next_t = time.monotonic()
         while self._running:
-            self._write(encode_frame(self.frame_at(time.monotonic())))
+            self._write(self.wire_frame_at(time.monotonic()))
             next_t += period
             time.sleep(max(0.0, next_t - time.monotonic()))
 

@@ -151,11 +151,10 @@ need torch for the real model, so run them in `.venv-vision` (or with `GLANCE_FA
 git clone <repo> ~/Glance && cd ~/Glance && git checkout integration
 bash runtime/scripts/install_pi.sh            # apt deps, .venv (no torch), openwakeword --no-deps, models
 . .venv/bin/activate
-export GLANCE_STT_URL=http://100.112.104.87:8001 GLANCE_STT_TOKEN=<token>
-export GLANCE_VISION_URL=ws://100.112.104.87:8000/ws GLANCE_TOKEN=<token> GEMINI_API_KEY=<key>
+nano runtime/glance.env                       # server URLs, tokens, GEMINI_API_KEY (made by the install)
 python -m runtime.selftest                    # env, camera, STT, vision, glove, audio: PASS/WARN/FAIL
-python -m runtime.voice_agent --reach real    # the live view is at http://<pi>:8090/ (web is the default
-                                              # without a display); keys: a letter + Enter in the terminal
+bash runtime/scripts/run_glance.sh --ptt-only # everything; the live view is at http://<pi>:8090/ (web is
+                                              # the default without a display); keys: a letter + Enter
 ```
 
 Per-machine settings (camera index or `picam` for the camera module, glove port) go in
@@ -163,17 +162,35 @@ Per-machine settings (camera index or `picam` for the camera module, glove port)
 
 ## Hardware glove
 
-The glove is driven over USB serial (`haptics/link.py`, protocol in `haptics/protocol.py`, firmware in
-`firmware/glove/glove.ino`). Motors are on or off; the wrist pulses faster as the hand gets closer.
+The glove is the Feather ESP32-S3 running `firmware/glove/code.py` (CircuitPython, 6 motors: thumb, index,
+ring, pinky, back of hand, palm), on USB serial (`haptics/link.py`, protocol in `haptics/protocol.py`). Motors
+are on or off. It has no wrist motor, so the proximity pulse only shows on the live view (CLAUDE.md
+decision 21). See `firmware/glove/README.md` for flashing. The port is found automatically (`port: auto`).
 
-```powershell
-.venv\Scripts\python -m runtime.glove_check --glove hardware --glove-port COM5      # each motor, then pulse rates
-.venv\Scripts\python -m runtime.voice_agent --reach real --glove hardware --glove-port COM5
-.venv\Scripts\python -m runtime.live_guidance --target "red can" --glove hardware --glove-port COM5
+```bash
+python -m runtime.glove ports                       # which serial port is the glove
+python -m runtime.glove test                        # firmware test: each motor once
+python -m runtime.glove buzz LEFT                   # one direction through the runtime's mapping
+python -m runtime.glove sweep                       # a simulated reach: guidance -> glove, no camera or server
+python -m runtime.glove_check --glove hardware      # each motor in turn, with the live view
+python -m runtime.voice_agent --reach real --glove hardware
+python -m runtime.live_guidance --target "red can" --glove hardware
+python3 firmware/glove/send_test.py /dev/ttyACM0 test   # the teammate's raw-frame bench test, unchanged
 ```
 
-Or set `glove: {kind: hardware, port: COM5}` in `runtime/config.local.yaml`. The live view still draws the
-motors, mirroring what the glove was told.
+Or set `glove: {kind: hardware}` in `runtime/config.local.yaml`. The live view still draws the motors,
+mirroring what the glove was told, with the ones this glove lacks crossed out.
+
+## Run the whole thing
+
+```bash
+python -m runtime.run --ptt-only        # or: bash runtime/scripts/run_glance.sh --ptt-only   (Pi)
+```
+
+Loads `runtime/glance.env` (copy `runtime/glance.env.example`: server URLs, tokens, `GEMINI_API_KEY`), uses
+the hardware glove if one is plugged in (fake otherwise), runs `runtime.selftest` and stops on any FAIL
+(`--force` to go on), then starts `runtime.voice_agent --reach real`. Without `--ptt-only` it listens for
+"hey glance" (headphones).
 
 ## Out of scope for the weekend
 

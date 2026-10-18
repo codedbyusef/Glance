@@ -23,5 +23,6 @@ view:
 
 glove:
   kind: fake           # fake (drawn on the live view) | hardware (USB serial, Step 4)
-  port: null           # hardware: serial port, e.g. COM5 or /dev/ttyUSB0
-  on_level: 255        # PWM level for an "on" motor (motors are on or off)
+  port: auto           # hardware: auto finds the Feather ESP32-S3; or e.g. /dev/ttyACM0 (Pi), COM5 (Windows)
+  on_level: 255        # level for an "on" motor (motors are on or off); code.py maps 255 to 85% duty
+  firmware: s3         # s3: firmware/glove/code.py, 6 motors, no wrist | ino8: glove.ino, 8 motors

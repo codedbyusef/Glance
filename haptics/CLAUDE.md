@@ -7,8 +7,11 @@ Owner: Jasper. Firmware lives in `firmware/glove/glove.ino`.
   (= J1 plug pins 1-8). Middle (2) is unused for now; reserved for a fingertip touch sensor.
 - Meaning: thumb = left, pinky = right, index = forward, ring = back, back of hand = up, palm = down,
   wrist = proximity (pulse rate: faster = closer).
-- Link: USB serial, 115200 baud. Frame = 0xAA + 8 levels (0-255) + XOR checksum. 0xA5 0x00 = all off,
+- Link: USB serial, 115200 baud. Frame = 0xAA + N levels (0-255) + XOR checksum. 0xA5 0x00 = all off,
   0xA5 0x01 = firmware test mode. Firmware turns every motor off if no frame arrives for 300 ms.
+- The glove in use is the ESP32-S3 (`firmware/glove/code.py`): **6 levels**, wire order thumb, index, ring,
+  pinky, back, palm (`protocol.S3_CHANNELS`); no middle, no wrist motor. `glove.ino` takes all 8.
+  `GloveLink(port, channels=S3_CHANNELS)` sends the 6; everything above the wire keeps the 8 logical channels.
 
 ## Files
 - `protocol.py` — byte format shared with the firmware.

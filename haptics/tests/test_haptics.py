@@ -29,6 +29,29 @@ def test_frame_rejects_bad_input():
         encode_frame([0] * 7 + [256])
 
 
+def test_s3_frames_carry_six_levels_in_wire_order():
+    from haptics.protocol import BACK, INDEX, PALM, PINKY, RING, S3_CHANNELS, THUMB, encode_levels, wire_levels
+
+    levels = [10, 11, 12, 13, 14, 15, 16, 17]       # thumb index middle ring pinky back palm wrist
+    wire = wire_levels(levels, S3_CHANNELS)
+    assert wire == [levels[ch] for ch in (THUMB, INDEX, RING, PINKY, BACK, PALM)] == [10, 11, 13, 14, 15, 16]
+    f = encode_levels(wire)
+    assert len(f) == 8 and f[0] == 0xAA and f[-1] == 10 ^ 11 ^ 13 ^ 14 ^ 15 ^ 16
+    assert wire_levels(levels) == levels
+
+
+def test_link_sends_only_the_firmware_channels():
+    from haptics.protocol import PALM, S3_CHANNELS, THUMB
+
+    link = GloveLink(dry_run=True, channels=S3_CHANNELS)
+    levels = [0] * 8
+    levels[THUMB], levels[PALM], levels[WRIST] = 255, 200, 255
+    link.set(levels, wrist_hz=2.0)
+    f = link.wire_frame_at(0.1)
+    assert list(f[1:7]) == [255, 0, 0, 0, 0, 200]      # no middle, no wrist on the S3 glove
+    assert len(GloveLink(dry_run=True).wire_frame_at(0.0)) == 10  # default: all 8 (glove.ino)
+
+
 def test_command():
     assert encode_command(1) == bytes([0xA5, 0x01])
 

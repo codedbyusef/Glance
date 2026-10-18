@@ -162,38 +162,41 @@ Enter to talk, Enter to stop.
 - Replies need no wake word while the reply window is open.
 - Talking over the speech cuts it (barge-in).
 
-## 10. Step 4: hardware glove
+## 10. Step 4: hardware glove (ESP32-S3, 6 motors)
 
-Flash `firmware/glove/glove.ino` to the ESP32 and plug it in over USB (COM port on the laptop,
-`/dev/ttyUSB0` on the Pi).
+Copy `firmware/glove/boot.py` and `code.py` to CIRCUITPY, press RESET, and plug the Feather into the laptop or
+the Pi over USB. The port is found automatically.
 
-```powershell
-.venv\Scripts\python -m runtime.glove_check --glove hardware --glove-port COM5 --firmware-test
+```bash
+python3 firmware/glove/send_test.py /dev/ttyACM0 test    # the teammate's raw bench test (COMx on Windows)
+python -m runtime.glove ports                            # marks the glove's port
+python -m runtime.glove test                             # firmware test through the runtime link: TEST 0 thumb ... TEST DONE
+python -m runtime.glove buzz LEFT                        # thumb; then RIGHT pinky, FORWARD index, BACK ring, UP back, DOWN palm
+python -m runtime.glove sweep                            # simulated reach: RIGHT+FORWARD, then fewer, then DOWN
+python -m runtime.glove_check --glove hardware --firmware-test
 ```
 
-- Each motor buzzes in turn, matching the label on screen: thumb = LEFT, index = FORWARD, ring = BACK,
-  pinky = RIGHT, back of hand = UP, palm = DOWN, wrist = proximity. The middle finger is reserved but
-  still checked.
-- Then the wrist pulses at 1, 2, 4 and 6 Hz. Note whether 6 Hz still feels like pulses (motor spin-up is
-  about 40 ms).
-- Then repeat step 6 and step 8 with `--glove hardware --glove-port COM5` added.
+- Each direction word buzzes the motor printed next to it. If one is wrong, the wiring or code.py's `PINS` order
+  disagrees with `haptics/protocol.py` `S3_CHANNELS`.
+- There is no wrist motor, so proximity only shows on the screen (decision 21).
+- Then repeat step 6 and step 8 with `--glove hardware` added.
 - Pulling the USB cable mid-reach must stop every motor (the firmware's 300 ms failsafe).
 
 ## 11. Step 5: Raspberry Pi (bash on the Pi)
 
 ```bash
 git clone <repo> ~/Glance && cd ~/Glance && git checkout integration
-bash runtime/scripts/install_pi.sh
+bash runtime/scripts/install_pi.sh                # then log out and in once (dialout group, for the glove)
+nano runtime/glance.env                           # server URLs, tokens, GEMINI_API_KEY
 . .venv/bin/activate
-export GLANCE_STT_URL=http://100.112.104.87:8001 GLANCE_STT_TOKEN=<stt token>
-export GLANCE_VISION_URL=ws://100.112.104.87:8000/ws GLANCE_TOKEN=<vision token> GEMINI_API_KEY=<key>
-python -m runtime.selftest                        # everything PASS, with the USB headset
+python -m runtime.selftest                        # everything PASS, with the USB headset and the glove plugged in
+python -m runtime.glove test                      # the glove from the Pi
 python -m runtime.voice_agent --reach keys        # watch http://<pi>:8090/ from the laptop; keys = letter + Enter
-python -m runtime.voice_agent --reach real
+bash runtime/scripts/run_glance.sh --ptt-only     # the whole thing: selftest, agent, real reaches, glove
 ```
 
 - The Pi camera module needs `camera: {source: picam}` in `runtime/config.local.yaml`.
-- Then the glove on the Pi: run `glove_check --glove hardware --glove-port /dev/ttyUSB0`, then the full flow.
+- `config.local.yaml` from the install script already says `glove: {kind: hardware}` (port auto-detected).
 - **Record:** FPS and timings on the Pi, against the laptop numbers from steps 6 and 8.
 - Audio acceptance on the Pi: `audio/README.md` "Acceptance run on the Pi".
 

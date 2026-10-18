@@ -43,7 +43,7 @@ from guide_agent.schemas import Frame
 from guide_agent.turnlog import TurnLog
 
 from . import config as runtime_config
-from .glove_out import FakeGlove, make_glove
+from .glove_out import FakeGlove, glove_from_config
 from .keyboard_reach import KEY_STATUS, KeyboardReach
 from .keys import StdinRouter, TogglePtt
 from .live_guidance import draw_reach, guidance_lines
@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> None:
                         help="keys: simulated with keys (Step 1); real: ReachAPI + guidance + glove (Step 3)")
     parser.add_argument("--mode", choices=("table", "wall"), default="table", help="guidance axis mode (--reach real)")
     parser.add_argument("--glove", choices=("fake", "hardware"), help="default: glove.kind in runtime/config")
-    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port)")
+    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port, auto = detect)")
     args = parser.parse_args(argv)
 
     from audio import config as audio_config
@@ -326,6 +326,7 @@ def main(argv: list[str] | None = None) -> None:
 
     from .camera import CameraHub
 
+    runtime_config.load_env()  # runtime/glance.env: server URLs and tokens on the Pi
     rt = runtime_config.load()
     load_dotenv()
     agent_cfg = load_agent_config()
@@ -349,8 +350,7 @@ def main(argv: list[str] | None = None) -> None:
             return build_mic(audio_cfg, sink, player=player, dispatch=dispatch, frame_source=camera.latest_frame,
                              task_active=task_active, log=log, ptt=ptt)
 
-    glove = make_glove(args.glove or rt["glove"]["kind"], args.glove_port or rt["glove"]["port"],
-                       rt["glove"]["on_level"])
+    glove = glove_from_config(rt, args.glove, args.glove_port)
     haptic_factory = None
     frame_log = None
     if args.reach == "real":

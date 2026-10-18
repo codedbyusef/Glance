@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from haptics import protocol
 
 from . import config as runtime_config
-from .glove_out import OFF, GloveCommand, make_glove
+from .glove_out import FIRMWARE_CHANNELS, OFF, GloveCommand, glove_from_config
 from .keys import StdinRouter
 from .view import View, blank, fit_width, text_panel
 
@@ -34,12 +34,18 @@ class Step:
     seconds: float
 
 
-def check_steps(hold_s: float = 1.5, gap_s: float = 0.5, pulse_s: float = 3.0) -> list[Step]:
-    """Every channel steadily on, one at a time (with an off gap), then the wrist at each pulse rate."""
+def check_steps(hold_s: float = 1.5, gap_s: float = 0.5, pulse_s: float = 3.0, channels=None) -> list[Step]:
+    """Every channel the glove has steadily on, one at a time (with an off gap), in its wire order; then the
+    wrist at each pulse rate, if it has a wrist motor. channels: logical channels (default all 8)."""
+    channels = tuple(range(8)) if channels is None else tuple(channels)
     steps: list[Step] = []
-    for ch, name in enumerate(protocol.CHANNELS):
-        steps.append(Step(f"{name} (channel {ch}) = {MEANING[ch]}: steady", GloveCommand(on=frozenset({ch})), hold_s))
+    for wire, ch in enumerate(channels):
+        name = protocol.CHANNELS[ch]
+        steps.append(Step(f"{name} (wire channel {wire}) = {MEANING[ch]}: steady", GloveCommand(on=frozenset({ch})),
+                          hold_s))
         steps.append(Step("off", OFF, gap_s))
+    if protocol.WRIST not in channels:
+        return steps
     for hz in PULSE_RATES:
         steps.append(Step(f"wrist pulsing at {hz:g} Hz (faster = closer)",
                           GloveCommand(pulse_hz={protocol.WRIST: hz}), pulse_s))
@@ -50,7 +56,7 @@ def check_steps(hold_s: float = 1.5, gap_s: float = 0.5, pulse_s: float = 3.0) -
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Step through each glove motor and pulse rate.")
     parser.add_argument("--glove", choices=("fake", "hardware"), help="default: glove.kind in runtime/config")
-    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port)")
+    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port, auto = detect)")
     parser.add_argument("--hold", type=float, default=1.5, help="seconds each motor stays on")
     parser.add_argument("--firmware-test", action="store_true", help="first run the firmware's test mode")
     parser.add_argument("--view", choices=("window", "web", "none"), default=runtime_config.default_view())
@@ -60,11 +66,12 @@ def main(argv: list[str] | None = None) -> None:
     from .camera import CameraHub
 
     rt = runtime_config.load()
-    glove = make_glove(args.glove or rt["glove"]["kind"], args.glove_port or rt["glove"]["port"],
-                       rt["glove"]["on_level"])
+    glove = glove_from_config(rt, args.glove, args.glove_port)
     camera = CameraHub.from_config(rt["camera"], 1024, source=args.camera).start()
     view = View(args.view, title="glance glove check", port=rt["view"]["web_port"])
-    steps = check_steps(args.hold)
+    hw = getattr(glove, "outputs", [None])[0]
+    steps = check_steps(args.hold, channels=getattr(hw, "channels", None)
+                        or FIRMWARE_CHANNELS[rt["glove"]["firmware"]])
     quit_flag, skip, paused = threading.Event(), threading.Event(), threading.Event()
 
     def on_key(k: str) -> None:
@@ -77,12 +84,14 @@ def main(argv: list[str] | None = None) -> None:
 
     StdinRouter({"q", "n", "p"}, on_key=on_key).start()
     try:
-        if args.firmware_test:
-            link = getattr(getattr(glove, "outputs", [None])[0], "link", None)
-            if link is not None:
-                print("firmware test mode: each channel pulses once (about 5 s)", flush=True)
-                link.test()
-                time.sleep(5.5)
+        if args.firmware_test and hw is not None:
+            print("firmware test mode: each channel pulses once", flush=True)
+            hw.link.test()
+            end = time.monotonic() + 6.0
+            while time.monotonic() < end:
+                for line in hw.read_lines():
+                    print(f"  glove: {line}", flush=True)
+                time.sleep(0.1)
         i = 0
         while not quit_flag.is_set():
             step = steps[i % len(steps)]

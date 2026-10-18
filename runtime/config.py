@@ -18,7 +18,7 @@ DEFAULTS = {
     "camera": {"source": 1, "width": 1280, "height": 720, "dshow": True, "fourcc": "MJPG", "fps": 30,
                "warmup_frames": 45, "jpeg_quality": 85},
     "view": {"web_port": 8090, "width": 960},
-    "glove": {"kind": "fake", "port": None, "on_level": 255},
+    "glove": {"kind": "fake", "port": "auto", "on_level": 255, "firmware": "s3"},
 }
 
 
@@ -39,6 +39,27 @@ def load(path: str | Path | None = None, local: str | Path | None = None) -> dic
     """path/local default to runtime/config.yaml and runtime/config.local.yaml."""
     cfg = _merge(DEFAULTS, _read(Path(path) if path else CONFIG_PATH))
     return _merge(cfg, _read(Path(local) if local else LOCAL_PATH))
+
+
+ENV_PATH = RUNTIME_DIR / "glance.env"
+
+
+def load_env(path: str | Path | None = None) -> list[str]:
+    """KEY=value lines from runtime/glance.env (gitignored) into os.environ; values already set win.
+    Returns the names it set (never the values)."""
+    path = Path(path) if path else ENV_PATH
+    if not path.exists():
+        return []
+    names = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if key and key not in os.environ:
+            os.environ[key] = value.strip("'\"")
+            names.append(key)
+    return names
 
 
 def default_view() -> str:

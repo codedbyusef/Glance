@@ -26,20 +26,26 @@ bash "$REPO/audio/scripts/fetch_models.sh"        # Piper voice, wake models, ti
 # The glove's USB serial port (Step 4) needs the dialout group; takes effect at the next login.
 sudo usermod -aG dialout "$USER" || true
 
+if [[ ! -f "$REPO/runtime/glance.env" ]]; then
+  cp "$REPO/runtime/glance.env.example" "$REPO/runtime/glance.env"   # fill in the tokens and GEMINI_API_KEY
+fi
+
 if [[ ! -f "$REPO/runtime/config.local.yaml" ]]; then
   cat > "$REPO/runtime/config.local.yaml" <<'YAML'
 # This Pi's runtime settings (gitignored). USB webcam index 0; use "picam" for the camera module.
 camera:
   source: 0
+glove:
+  kind: hardware       # the Feather ESP32-S3 on USB, found automatically (port: auto)
 YAML
 fi
 
 echo
 echo "done. Next:"
-echo "  . .venv/bin/activate"
-echo "  export GLANCE_STT_URL=... GLANCE_STT_TOKEN=... GLANCE_VISION_URL=... GLANCE_TOKEN=... GEMINI_API_KEY=..."
-echo "  python -m runtime.selftest"
-echo "  python -m runtime.voice_agent --reach keys     # the live view is at http://<pi>:8090/ (--view web is the default here)"
+echo "  edit runtime/glance.env (tokens, GEMINI_API_KEY), then log out and back in (dialout group)"
+echo "  . .venv/bin/activate && python -m runtime.glove ports && python -m runtime.glove test"
+echo "  bash runtime/scripts/run_glance.sh --ptt-only  # selftest + agent + real reaches + glove;"
+echo "                                                 # the live view is at http://<pi>:8090/"
 echo
 echo "If picamera2 fails to import with a numpy error, pip's numpy is shadowing apt's: use a USB webcam"
 echo "(camera.source: 0) or 'pip install \"numpy<2\"' in the venv."
