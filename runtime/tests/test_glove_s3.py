@@ -49,6 +49,14 @@ def test_s3_glove_sends_six_levels_in_code_py_order():
         assert wire(g) == expected, protocol.CHANNELS[logical]
 
 
+def test_s3_glove_pulses_direction_motors():
+    g = HardwareGlove(firmware="s3", link=DryLink(protocol.S3_CHANNELS))
+    g.apply(GloveCommand(pulse_hz={protocol.LEFT: 2.0, protocol.DOWN: 2.0}))
+    assert list(g.link.wire_frame_at(10.0)[1:-1]) == [255, 0, 0, 0, 0, 255]   # first half: thumb + palm on
+    assert list(g.link.wire_frame_at(10.3)[1:-1]) == [0] * 6                   # second half: off
+    assert list(g.link.wire_frame_at(10.52)[1:-1]) == [255, 0, 0, 0, 0, 255]  # next pulse
+
+
 def test_s3_glove_ignores_middle_and_wrist():
     g = HardwareGlove(firmware="s3", link=DryLink(protocol.S3_CHANNELS))
     g.apply(GloveCommand(on=frozenset({protocol.MIDDLE, protocol.LEFT}), pulse_hz={protocol.WRIST: 4.0}))
@@ -93,8 +101,9 @@ def test_fake_panel_crosses_out_motors_the_glove_lacks():
 
 def test_glove_check_steps_follow_the_firmware():
     steps = [s for s in check_steps(channels=FIRMWARE_CHANNELS["s3"]) if s.label != "off"]
-    assert [next(iter(s.cmd.on)) for s in steps] == list(protocol.S3_CHANNELS)  # 6 motors, no pulse steps
+    assert [next(iter(s.cmd.on)) for s in steps[:6]] == list(protocol.S3_CHANNELS)  # the 6 motors, steady
     assert "wire channel 2" in steps[2].label and "ring" in steps[2].label
+    assert [s.cmd.pulse_hz for s in steps[6:]] == [{protocol.INDEX: hz} for hz in (1.0, 2.0, 4.0, 6.0)]
     assert len([s for s in check_steps() if s.label != "off"]) == 8 + 4  # glove.ino: 8 motors + 4 pulse rates
 
 

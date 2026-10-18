@@ -6,7 +6,7 @@ import json
 import pytest
 
 from haptics import protocol
-from runtime.glove_out import OFF, FakeGlove
+from runtime.glove_out import OFF, FakeGlove, GloveCommand
 from runtime.guidance import Guidance, command_from, distance_text
 from runtime.live_guidance import FrameLog, ReachLoop
 
@@ -39,8 +39,8 @@ def settle(g, hand, n=8, **kw):
 ])
 def test_table_mode_directions(hand, word, channel):
     st = settle(Guidance("table"), hand)
-    assert st.words == [word] and st.cmd.on == frozenset({channel})
-    assert st.cmd.pulse_hz[protocol.WRIST] == st.wrist_hz > 0
+    assert st.words == [word] and st.cmd.on == frozenset()           # nothing steady (decision 24)
+    assert st.cmd.pulse_hz == {channel: st.pulse_hz} and st.pulse_hz > 0  # the direction motor pulses; no wrist
 
 
 @pytest.mark.parametrize("hand,depth_error,words", [
@@ -82,12 +82,19 @@ def test_deadband_and_hysteresis():
 
 # ------------------------------------------------------------------ proximity
 
-def test_wrist_pulse_rate_rises_as_the_hand_gets_closer():
+def test_direction_pulse_rate_rises_as_the_hand_gets_closer():
     rates = []
-    for x in (20, 120, 220, 280):
-        rates.append(settle(Guidance("table"), (x, 240)).wrist_hz)
+    for x in (20, 120, 220, 255):  # 255: just outside the deadband of the box edge
+        st = settle(Guidance("table"), (x, 240))
+        assert st.cmd.pulse_hz == {protocol.PINKY: st.pulse_hz}  # RIGHT pulses at the proximity rate
+        rates.append(st.pulse_hz)
     assert rates == sorted(rates) and rates[0] < rates[-1]
     assert 1.0 <= rates[0] and rates[-1] <= 6.0
+
+
+def test_every_active_direction_pulses_at_the_same_rate():
+    st = settle(Guidance("table"), (100, 450))
+    assert set(st.cmd.pulse_hz) == {protocol.PINKY, protocol.INDEX} and len(set(st.cmd.pulse_hz.values())) == 1
 
 
 # ------------------------------------------------------------------ all off
@@ -109,9 +116,10 @@ def test_touching_is_all_off():
 
 def test_command_from_levels():
     levels = [0] * 8
-    levels[protocol.THUMB], levels[protocol.WRIST] = 150, 200
+    levels[protocol.THUMB], levels[protocol.PALM], levels[protocol.WRIST] = 150, 160, 200
     cmd = command_from(levels, 3.0)
-    assert cmd.on == frozenset({protocol.THUMB}) and cmd.pulse_hz == {protocol.WRIST: 3.0}
+    assert cmd.on == frozenset() and cmd.pulse_hz == {protocol.THUMB: 3.0, protocol.PALM: 3.0}  # wrist ignored
+    assert command_from(levels, 0.0) == GloveCommand(on=frozenset({protocol.THUMB, protocol.PALM}))
     assert command_from([0] * 8, 3.0) == OFF
 
 
@@ -175,7 +183,7 @@ def test_loop_progress_drives_the_glove_and_logs_every_stage(tmp_path):
     loop, glove, log = make_loop(tmp_path)
     for i in range(5):
         loop.api.on_progress(progress((100, 240), session="s1", frame_id=i))
-    assert glove.command.on == frozenset({protocol.PINKY})
+    assert set(glove.command.pulse_hz) == {protocol.PINKY}
     rec = json.loads((tmp_path / "g.jsonl").read_text().splitlines()[-1])
     assert rec["words"] == ["RIGHT"] and rec["frame_id"] == 4
     assert {"capture", "encode", "network", "server", "track", "hand", "depth_model", "guidance"} <= set(rec["ms"])

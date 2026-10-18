@@ -118,7 +118,7 @@ def test_pause_resume_and_stale_ids(rig):
     h, _, _, glove, frames = rig
     sid = h.start("can", "")
     h.api.on_progress(progress(sid))
-    assert glove.command.on == frozenset({protocol.PINKY})
+    assert set(glove.command.pulse_hz) == {protocol.PINKY}
     h.pause(sid)
     assert ("pause", sid) in h.api.calls and glove.command == OFF and "PAUSED" in h.describe()
     h.api.on_progress(progress(sid))  # in flight when the pause landed: ignored

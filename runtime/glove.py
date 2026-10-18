@@ -58,7 +58,7 @@ def run_sweep(glove, mode: str, seconds: float, hz: float = 20.0, out=print) -> 
         st = g.update(msg)
         glove.apply(st.cmd)
         seen.append(st.words)
-        line = f"{' '.join(st.words) or '-':16s} wrist {st.wrist_hz:.1f} Hz (proximity; no wrist motor on the S3)"
+        line = f"{' '.join(st.words) or '-':16s} pulsing {st.pulse_hz:.1f} Hz (faster = closer)"
         if line != last:
             out(f"  {line}")
             last = line

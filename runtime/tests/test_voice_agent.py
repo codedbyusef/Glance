@@ -238,9 +238,9 @@ def test_real_reach_path_start_progress_result_through_the_controller(rigs):
     assert (s := r.step()).type == "reach" and s.state == "running" and s.session_id == h.session_id
     sid = h.session_id
     h.api.on_progress(progress(sid))
-    assert holder["glove"].command.on  # guidance drives the glove
+    assert holder["glove"].command.pulse_hz  # guidance drives the glove (pulsing direction motors)
     h.api.on_result(result(sid, "success"))
-    assert holder["glove"].command.on == frozenset()
+    assert holder["glove"].command.pulse_hz == {} and holder["glove"].command.on == frozenset()
     r.wait(lambda: (s := r.step()) is not None and s.type == "speak" and s.expect == "answer", what="touch check")
     assert '"status": "success"' in model_inputs(model)[1]
 

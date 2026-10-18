@@ -1,8 +1,9 @@
 """Progress message -> glove command (CLAUDE.md section 5), plus what the live view shows.
 
 haptics.GuidanceController is used unchanged, with success_frames=None (the vision server's reach session
-owns success). Its output is mapped to on/off motors: a direction channel is on if its level > 0, and the
-wrist pulses at cmd.wrist_hz.
+owns success). Its output is mapped to on/off motors (CLAUDE.md section 5 and decision 24): a direction
+channel with level > 0 is active, and every active direction motor pulses at the proximity rate
+(cmd.wrist_hz: 1 Hz far, 6 Hz near). There is no wrist motor; the controller's PROXIMITY level is unused.
 
     g = Guidance("table")
     state = g.update(progress)        # one per progress message
@@ -29,7 +30,7 @@ _WORD_ORDER = (protocol.LEFT, protocol.RIGHT, protocol.FORWARD, protocol.BACKWAR
 class GuidanceState:
     cmd: GloveCommand = field(default_factory=GloveCommand)
     words: list[str] = field(default_factory=list)   # active direction commands, e.g. ["LEFT", "FORWARD"]
-    wrist_hz: float = 0.0
+    pulse_hz: float = 0.0                            # proximity: the rate the active direction motors pulse at
     status: str = "idle"                             # the controller's: guiding | aligned | success | hand_lost | ...
     mode: str = "table"
     dx: Optional[float] = None                       # normalized image error (fraction of width), + = target right
@@ -42,11 +43,16 @@ class GuidanceState:
     ms: float = 0.0                                  # time spent in update()
 
 
-def command_from(levels: list[int], wrist_hz: float) -> GloveCommand:
-    """Section 5 mapping: on if level > 0; the wrist pulses at wrist_hz instead of being steadily on."""
-    on = frozenset(ch for ch, level in enumerate(levels) if level > 0 and ch != protocol.WRIST)
-    pulse = {protocol.WRIST: wrist_hz} if levels[protocol.WRIST] > 0 and wrist_hz > 0 else {}
-    return GloveCommand(on=on, pulse_hz=pulse)
+DIRECTIONS = frozenset(WORDS)
+
+
+def command_from(levels: list[int], proximity_hz: float) -> GloveCommand:
+    """Decision 24: each active direction motor (level > 0) pulses at the proximity rate; nothing is steady.
+    Without a rate (0) the active motors are steadily on. The wrist/PROXIMITY level is ignored."""
+    active = [ch for ch, level in enumerate(levels) if level > 0 and ch in DIRECTIONS]
+    if proximity_hz > 0:
+        return GloveCommand(pulse_hz={ch: proximity_hz for ch in active})
+    return GloveCommand(on=frozenset(active))
 
 
 def distance_text(depth: Optional[dict], dx: Optional[float], dy: Optional[float],
@@ -118,10 +124,11 @@ class Guidance:
         glove = command_from(cmd.levels, cmd.wrist_hz)
         has_error = box is not None and hand is not None
         dx, dy = (cmd.error if has_error else (None, None))
+        active = glove.on | set(glove.pulse_hz)
         st = GuidanceState(
             cmd=glove,
-            words=[WORDS[ch] for ch in _WORD_ORDER if ch in glove.on],
-            wrist_hz=glove.pulse_hz.get(protocol.WRIST, 0.0),
+            words=[WORDS[ch] for ch in _WORD_ORDER if ch in active],
+            pulse_hz=max(glove.pulse_hz.values(), default=0.0),
             status=cmd.status,
             mode=self.mode,
             dx=dx, dy=dy,

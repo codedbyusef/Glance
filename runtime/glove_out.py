@@ -1,10 +1,11 @@
-"""The one glove output interface (CLAUDE.md section 5). Motors are on or off; proximity is the wrist's pulse rate.
+"""The one glove output interface (CLAUDE.md section 5). Motors are on or off; proximity is the pulse rate of the
+active direction motors (decision 24).
 
 Channel indices and names come from haptics/protocol.py. All-off happens on session end, pause, cancel, any
 exception and process exit; callers use all_off() on every one of those paths.
 
-The real glove is the 6-motor ESP32-S3 (firmware/glove/code.py): thumb, index, ring, pinky, back, palm. It has
-no middle-finger and no wrist motor, so the wrist's proximity pulse has nowhere to go on hardware (decision 21).
+The real glove is the 6-motor ESP32-S3 (firmware/glove/code.py): one motor per direction (thumb, index, ring,
+pinky, back, palm), no middle-finger and no wrist motor.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from haptics import protocol
 @dataclass(frozen=True)
 class GloveCommand:
     on: frozenset[int] = frozenset()  # channel indices from haptics/protocol.py that are steadily on
-    pulse_hz: dict[int, float] = field(default_factory=dict)  # channel -> pulse rate (today only WRIST); 0 = none
+    pulse_hz: dict[int, float] = field(default_factory=dict)  # channel -> pulse rate (guidance: the direction motors)
 
 
 OFF = GloveCommand()
@@ -35,11 +36,27 @@ class GloveOutput(Protocol):
 
 
 def channel_on(cmd: GloveCommand, ch: int, t: float) -> bool:
-    """Whether a channel is energized at time t: steady channels are on, pulsing ones are on for half a period."""
+    """Whether a channel is energized at time t with a fixed rate: steady channels are on, pulsing ones are on for
+    the first half of each period (FakeGlove uses PulsePhase so rate changes stay smooth)."""
     if ch in cmd.on:
         return True
     hz = cmd.pulse_hz.get(ch, 0.0)
     return hz > 0 and (t * hz) % 1.0 < 0.5
+
+
+class PulsePhase:
+    """Per-channel pulse phase advanced by hz * elapsed time (like haptics.link.GloveLink.frame_at), so a rate
+    that changes every frame speeds the blinking up smoothly; a channel that starts pulsing starts "on"."""
+
+    def __init__(self):
+        self._phase: dict[int, float] = {}
+        self._t: float | None = None
+
+    def on(self, cmd: GloveCommand, t: float) -> set[int]:
+        dt = 0.0 if self._t is None else max(0.0, t - self._t)
+        self._t = t
+        self._phase = {ch: (self._phase.get(ch, 0.0) + hz * dt) % 1.0 for ch, hz in cmd.pulse_hz.items() if hz > 0}
+        return set(cmd.on) | {ch for ch, ph in self._phase.items() if ph < 0.5}
 
 
 # The logical channels each firmware has (haptics/protocol.py), in wire order.
@@ -65,6 +82,7 @@ class FakeGlove:
         self.clock = clock
         self.channels = set(channels) if channels is not None else set(range(8))
         self.label = label
+        self._pulse = PulsePhase()
         self._lock = threading.Lock()
         self._cmd = OFF
         self.applied = 0  # for tests
@@ -85,6 +103,7 @@ class FakeGlove:
     def draw(self, img: np.ndarray, origin: tuple[int, int]) -> None:
         """Draw the panel with its top-left corner at origin."""
         cmd, t = self.command, self.clock()
+        lit = self._pulse.on(cmd, t)
         x0, y0 = origin
         cv2.rectangle(img, (x0, y0), (x0 + 150, y0 + 190), (30, 30, 30), -1)
         cv2.putText(img, self.label, (x0 + 6, y0 + 186), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
@@ -93,13 +112,13 @@ class FakeGlove:
                 cv2.circle(img, (x0 + x, y0 + y), 11, (60, 60, 60), 1)
                 cv2.line(img, (x0 + x - 8, y0 + y - 8), (x0 + x + 8, y0 + y + 8), (60, 60, 60), 1)
                 continue
-            on = channel_on(cmd, ch, t)
+            on = ch in lit
             color = (0, 220, 255) if on else (90, 90, 90)
             cv2.circle(img, (x0 + x, y0 + y), 11, color, -1 if on else 2)
             cv2.putText(img, _MEANING[ch], (x0 + x - 12, y0 + y + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.33,
                         (0, 0, 0) if on else (200, 200, 200), 1)
-        hz = cmd.pulse_hz.get(protocol.WRIST, 0.0)
-        if hz > 0 and protocol.WRIST in self.channels:
+        hz = max(cmd.pulse_hz.values(), default=0.0)
+        if hz > 0:
             cv2.putText(img, f"{hz:.1f} Hz", (x0 + 98, y0 + 162), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 220, 255), 1)
 
 
@@ -107,9 +126,10 @@ class HardwareGlove:
     """The real glove over USB serial (Step 4), through haptics.link.GloveLink and the firmware protocol in
     haptics/protocol.py: a steady channel is sent at on_level, an off channel at 0, and only the channels the
     firmware has go on the wire, in its order (firmware "s3": code.py's 6 motors; "ino8": glove.ino's 8).
-    GloveLink resends the latest levels at 50 Hz on its own thread (and gates the wrist on/off at its pulse
-    rate, for gloves that have one), so apply() only stores the command and never blocks. The firmware turns
-    every motor off if no frame arrives for 300 ms, so a crashed process can't leave a motor on.
+    GloveLink resends the latest levels at 50 Hz on its own thread and gates each pulsing channel on/off at its
+    rate (the proximity pulse on the direction motors), so apply() only stores the command and never blocks.
+    The firmware turns every motor off if no frame arrives for 300 ms, so a crashed process can't leave a
+    motor on.
 
     port "auto" (or None) finds the glove with find_glove_port()."""
 
@@ -135,9 +155,10 @@ class HardwareGlove:
 
     def apply(self, cmd: GloveCommand) -> None:
         levels = [0] * 8
-        for ch in cmd.on | set(ch for ch, hz in cmd.pulse_hz.items() if hz > 0):
+        pulse = {ch: hz for ch, hz in cmd.pulse_hz.items() if hz > 0}
+        for ch in cmd.on | set(pulse):
             levels[ch] = self.on_level
-        self.link.set(levels, cmd.pulse_hz.get(protocol.WRIST, 0.0))
+        self.link.set(levels, 0.0, pulse_hz=pulse)
 
     def all_off(self) -> None:
         self.link.off()  # zero levels now, plus the firmware's all-off command
@@ -205,7 +226,7 @@ def make_glove(kind: str, port: str | None = None, on_level: int = 255, firmware
     """The live scripts' glove: fake -> FakeGlove; hardware -> HardwareGlove mirrored on a FakeGlove panel
     that crosses out the motors this glove doesn't have."""
     if kind == "fake":
-        return FakeGlove()
+        return FakeGlove(channels=FIRMWARE_CHANNELS[firmware])  # draws the glove the hardware would be
     if kind == "hardware":
         hw = HardwareGlove(port, on_level, firmware)
         return TeeGlove(hw, FakeGlove(channels=hw.channels, label=f"glove ({firmware}, {hw.port})"))

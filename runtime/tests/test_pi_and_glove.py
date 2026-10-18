@@ -40,8 +40,8 @@ def test_glove_check_covers_every_channel_then_every_pulse_rate():
     steady = steps[:8]
     assert [next(iter(s.cmd.on)) for s in steady] == list(range(8))
     assert all(s.cmd.pulse_hz == {} for s in steady)
-    pulses = steps[8:]
-    assert [s.cmd.pulse_hz[protocol.WRIST] for s in pulses] == list(PULSE_RATES)
+    pulses = steps[8:]  # proximity rates on a direction motor (index), not the wrist (decision 24)
+    assert [s.cmd.pulse_hz[protocol.INDEX] for s in pulses] == list(PULSE_RATES)
     assert all(s.cmd.on == frozenset() for s in pulses)
     assert all(s.cmd == OFF for s in check_steps() if s.label == "off")
 

@@ -110,7 +110,8 @@ The camera looks down at the desk, with the gloved hand in view. Check:
 
 - **Directions (table mode):** hand left of the can → RIGHT, hand right → LEFT, hand nearer to you than the
   can → FORWARD, past it → BACK. Over the can → DOWN.
-- **Wrist:** pulses faster as the hand closes in, from 1 Hz far to 6 Hz near.
+- **Proximity:** the active direction motors pulse faster as the hand closes in, from 1 Hz far to 6 Hz near
+  (the fake glove panel blinks them; the Hz shows next to the command words).
 - **dz:** falls as the hand comes down onto the paper. FROZEN shows when the hand covers the target.
   TOUCHING fires at real contact and not while hovering, then END: success.
 - **Wall mode** (`m`, can on a shelf, camera looking ahead): UP and DOWN come from the image, and FORWARD and
@@ -178,7 +179,8 @@ python -m runtime.glove_check --glove hardware --firmware-test
 
 - Each direction word buzzes the motor printed next to it. If one is wrong, the wiring or code.py's `PINS` order
   disagrees with `haptics/protocol.py` `S3_CHANNELS`.
-- There is no wrist motor, so proximity only shows on the screen (decision 21).
+- `sweep` and `glove_check` also show proximity: the direction motors pulse faster as the fake hand closes in,
+  and `glove_check` ends with the index at 1, 2, 4 and 6 Hz. Note whether 6 Hz still feels like pulses.
 - Then repeat step 6 and step 8 with `--glove hardware` added.
 - Pulling the USB cable mid-reach must stop every motor (the firmware's 300 ms failsafe).
 

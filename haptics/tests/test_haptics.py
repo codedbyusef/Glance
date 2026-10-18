@@ -186,9 +186,24 @@ def test_link_gates_wrist_at_its_pulse_rate():
     link = GloveLink(dry_run=True)
     levels = [0] * 8
     levels[PROXIMITY] = 200
-    link.set(levels, wrist_hz=2.0)       # period 0.5 s: on for 0.25 s, off for 0.25 s
+    link.set(levels, wrist_hz=2.0)       # period 0.5 s: on for 0.25 s, off for 0.25 s, from the first frame
     assert link.frame_at(0.10)[WRIST] == 200
-    assert link.frame_at(0.35)[WRIST] == 0
+    assert link.frame_at(0.40)[WRIST] == 0
+    assert link.frame_at(0.62)[WRIST] == 200
+
+
+def test_link_pulses_any_channel_and_rate_changes_stay_smooth():
+    link = GloveLink(dry_run=True)
+    levels = [0] * 8
+    levels[0] = 255
+    link.set(levels, pulse_hz={0: 2.0})
+    assert link.frame_at(1000.00)[0] == 255     # a pulse starts with its "on" half
+    assert link.frame_at(1000.30)[0] == 0       # 0.3 s at 2 Hz: second half
+    link.set(levels, pulse_hz={0: 2.1})         # a small rate change does not jump the phase
+    assert link.frame_at(1000.32)[0] == 0
+    assert link.frame_at(1000.52)[0] == 255     # next period begins
+    link.set(levels)                            # no pulse: steady on
+    assert link.frame_at(1000.80)[0] == 255
 
 
 def test_link_clamps_levels():

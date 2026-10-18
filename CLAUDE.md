@@ -84,20 +84,20 @@ The components were built and tested in isolation by different people. This file
 
 The motors are **on or off only**. Intensity carries no information.
 - **Direction channels** (left, right, forward, back, up, down) are steadily on or off.
-- **Proximity** is the **wrist motor's pulse rate**: slow when far, fast when close. Starting values are 1 Hz far and 6 Hz near; coin motors need about 40 ms to spin up, so faster blurs.
+- **Proximity** is the **pulse rate of the active direction motors** (decision 24; there is no wrist motor): slow when far, fast when close. Starting values are 1 Hz far and 6 Hz near; coin motors need about 40 ms to spin up, so faster blurs.
 - **Channel order and meaning** come from `haptics/protocol.py`, the source of truth:
   - thumb = left, index = forward, middle = reserved, ring = back, pinky = right
-  - back of hand = up, palm = down, wrist = proximity
+  - back of hand = up, palm = down (the wrist is no longer used: decision 24)
 
   Tell me if anything else in the repo disagrees.
-- **Keep `haptics/GuidanceController` unchanged where possible.** Map its output: a channel is on if its level > 0, and the wrist pulse rate is `cmd.wrist_hz`. Run it with `success_frames=None`, because the vision server's reach session owns `success`.
+- **Keep `haptics/GuidanceController` unchanged where possible.** Map its output: a direction channel is active if its level > 0, and every active direction motor pulses at `cmd.wrist_hz` (the proximity rate). Run it with `success_frames=None`, because the vision server's reach session owns `success`.
 - **Output goes through one interface,** `runtime/glove_out.py`:
 
 ```python
 @dataclass
 class GloveCommand:
     on: frozenset[int]          # channel indices from haptics/protocol.py that are steadily on
-    pulse_hz: dict[int, float]  # channel -> pulse rate (today only WRIST); 0 or missing = no pulsing
+    pulse_hz: dict[int, float]  # channel -> pulse rate (the active direction motors); 0 or missing = no pulsing
 
 class GloveOutput(Protocol):
     def apply(self, cmd: GloveCommand) -> None: ...   # called each vision frame; must not block
@@ -210,7 +210,7 @@ Goal: point the camera at the glove and an object, and see the right commands, d
 - **`runtime/guidance.py`:** per progress message, call `haptics.GuidanceController.update(hand, box, frame_size, depth_error, touching)` in the configured axis mode (default `table`; a demo key toggles `wall`), then produce a `GloveCommand` per section 5. For display, also compute:
   - `dx`, `dy`: normalized image error, from the controller
   - `dz`: the depth `gap`, in depth units
-  - the active commands as words (LEFT, RIGHT, FORWARD, BACK, UP, DOWN) and the wrist pulse rate
+  - the active commands as words (LEFT, RIGHT, FORWARD, BACK, UP, DOWN) and their pulse rate
   - a distance estimate: cm when depth is metric (with lateral cm from `focal_px` if it's calibrated in `depth-estimation/config.yaml`), otherwise normalized values labeled as such
 - **`runtime/live_guidance.py --target "red can" [--refer ...] [--view ...]`** uses `CameraHub` and `ReachAPI` against `GLANCE_VISION_URL`. It also accepts a local `GLANCE_FAKE_MODELS=1` server, for wiring checks.
   - Overlays: target box, hand point, an arrow from hand to target, the command words, dx/dy/dz, the distance, touching and frozen state, and the `FakeGlove` motor diagram blinking at the pulse rates.
@@ -273,7 +273,7 @@ Build:
 2. The existing `object-detection` server and `ReachAPI` are the vision path. Depth and hand detection run there, on the GPU host.
 3. The vision server's reach session owns `success`. The client-side `GuidanceController` runs with `success_frames=None`.
 4. The default axis mode is `table` (paper or can on a desk, camera looking down).
-5. Motors are on or off. Proximity is the wrist's pulse rate.
+5. Motors are on or off. Proximity is the pulse rate of the active direction motors (decision 24).
 6. STT and vision servers run as separate processes with separate venvs.
 7. Step 0 layout: each top-level folder is its package (`guide_agent`, `audio`, `haptics`, `object_detection`, `hand_detection`, `depth_estimation`, `runtime`). `agent/` was flattened into `guide_agent/`, and its photo folder `fixtures/` is now `fixture_frames/`. Tests go in `<pkg>/tests/`, runnable tools in `<pkg>/scripts/` (`python -m <pkg>.scripts.<name>`). Everything runs from the repo root. `pyproject.toml` declares packages only.
 8. Requirements by machine role: `runtime/requirements.txt` (client: laptop and Pi, aarch64, no torch), `requirements-dev.txt` (unit tests), `object_detection/requirements-server.txt` (vision server, installed after the torch CUDA build, `opencv-contrib-python` only), and `audio/requirements-server[-windows].txt` (STT server, unchanged). Venvs: `.venv` (client), `.venv-vision` (vision server), `audio\.venv` (STT server on the GPU PC). `audio/scripts/install_pi.sh` keeps the openWakeWord `--no-deps` step.
@@ -289,6 +289,7 @@ Build:
 18. Step 3: `runtime/reach_haptic.py` `ReachHaptic` is the `HapticLoop` on `ReachAPI`. The interface is synchronous and the controller calls it on its loop, so `start()` blocks that loop while the WebSocket connects (milliseconds normally, at most `reach_api.start_timeout_s` + 1 s on failure, which becomes `HapticStartError` → stale_link). `cancelled` results are dropped. `ambiguous` (off by default on the server) maps to `target_not_found`, the nearest status the agent knows. Guidance's table/wall mode survives across reaches; `m` toggles it.
 19. Step 5 (built; the Pi run is still to do): `runtime/scripts/install_pi.sh` sets up the root `.venv` on the Pi with `--system-site-packages` (gpiozero, picamera2), installs `runtime/requirements.txt` and `openwakeword --no-deps`, fetches the models, and adds the user to `dialout`. Per-machine settings go in the gitignored `runtime/config.local.yaml`. `--view` defaults to `web` on Linux without a display. Camera source `picam` uses Picamera2; a USB webcam is the default. `runtime/selftest.py` checks env, camera, STT, vision (health plus a `/ws` start and cancel), glove and audio.
 20. Step 4 (built; untested on hardware): `HardwareGlove` drives the glove through `haptics.link.GloveLink`, over the USB serial protocol the repo's firmware implements. A steady channel is sent at `glove.on_level`. GloveLink pulses the wrist in software at 50 Hz, and the firmware turns everything off after 300 ms without a frame. Section 5 says to wrap "the teammates' per-motor on/off functions"; no such interface is in the repo. If the teammates have one, it replaces GloveLink inside `HardwareGlove` and nothing else changes. `--glove fake|hardware` and `--glove-port` work on `voice_agent`, `live_guidance` and `glove_check`, and the hardware glove is mirrored on the fake panel.
-21. The glove in use is the 6-motor ESP32-S3 (`firmware/glove/code.py`, CircuitPython): thumb, index, ring, pinky, back, palm, in that wire order. It has no middle-finger motor and **no wrist motor**, which contradicts section 5's proximity-as-wrist-pulse. `haptics/protocol.py` keeps the 8 logical channels (the GuidanceController and GloveCommand use them) and adds `S3_CHANNELS`. `GloveLink(channels=...)` sends only those 6 (6-level frames); the default still sends 8 for `glove.ino`. Runtime `glove.firmware: s3` (default) or `ino8`. On the S3, proximity is shown on the live view only. **Open question:** convey proximity some other way (for example, pulse the active direction motors at the proximity rate), or drop it.
+21. The glove in use is the 6-motor ESP32-S3 (`firmware/glove/code.py`, CircuitPython): thumb, index, ring, pinky, back, palm, in that wire order. It has no middle-finger motor and **no wrist motor**, which contradicts section 5's proximity-as-wrist-pulse. `haptics/protocol.py` keeps the 8 logical channels (the GuidanceController and GloveCommand use them) and adds `S3_CHANNELS`. `GloveLink(channels=...)` sends only those 6 (6-level frames); the default still sends 8 for `glove.ino`. Runtime `glove.firmware: s3` (default) or `ino8`. Proximity: resolved by decision 24.
 22. `python -m runtime.run` (and `runtime/scripts/run_glance.sh` on the Pi) runs the whole thing. It loads `runtime/glance.env` (gitignored; template `runtime/glance.env.example`), uses the hardware glove if one is plugged in (`port: auto` finds the Adafruit/Espressif USB vendor id), runs the selftest (stops on FAIL unless `--force`), then `voice_agent --reach real`. `python -m runtime.glove ports|test|buzz|sweep|off` drives the glove through the runtime's own path; `firmware/glove/send_test.py` stays as the raw-frame bench test.
 23. Unit tests ignore a developer's `object_detection/.env` and shell `GLANCE_*` variables (`object_detection/tests/conftest.py`). A local `.env` with a token made the server tests fail with 403.
+24. Design change (2026-10-18): 6 motors for the 6 directions, no wrist motor. Proximity is carried by the direction motors: every active direction motor pulses at the controller's proximity rate (`cmd.wrist_hz`: 1 Hz far, 6 Hz near), on for the first half of each period; nothing is steadily on during guidance. When no direction is active (aligned within the deadband but not yet inside the box) nothing buzzes. `GloveLink.set` takes `pulse_hz` for any channel, and pulse phase now advances by hz times elapsed time: the old `(t * hz) mod 1` on the absolute clock jumped phase whenever the rate changed, which turned a per-frame-changing rate into random flicker. The fake panel uses the same phase rule.

@@ -164,8 +164,8 @@ Per-machine settings (camera index or `picam` for the camera module, glove port)
 
 The glove is the Feather ESP32-S3 running `firmware/glove/code.py` (CircuitPython, 6 motors: thumb, index,
 ring, pinky, back of hand, palm), on USB serial (`haptics/link.py`, protocol in `haptics/protocol.py`). Motors
-are on or off. It has no wrist motor, so the proximity pulse only shows on the live view (CLAUDE.md
-decision 21). See `firmware/glove/README.md` for flashing. The port is found automatically (`port: auto`).
+are on or off, one per direction; the active direction motors pulse faster as the hand gets closer (1 Hz far,
+6 Hz near; CLAUDE.md decision 24). See `firmware/glove/README.md` for flashing. The port is found automatically (`port: auto`).
 
 ```bash
 python -m runtime.glove ports                       # which serial port is the glove

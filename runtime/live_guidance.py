@@ -94,7 +94,7 @@ def frame_record(msg: dict, state: GuidanceState, capture_age: Optional[float]) 
     ms["round_trip"] = client.get("round_trip_ms")
     return {
         "t": round(time.time(), 3), "session_id": msg.get("session_id"), "frame_id": msg.get("frame_id"),
-        "ms": ms, "mode": state.mode, "words": state.words, "wrist_hz": round(state.wrist_hz, 2),
+        "ms": ms, "mode": state.mode, "words": state.words, "pulse_hz": round(state.pulse_hz, 2),
         "status": state.status, "dx": state.dx, "dy": state.dy, "dz": state.dz, "units": state.units,
         "touching": state.touching, "frozen": state.frozen,
         "target_box": msg.get("target_box"), "hand_point": msg.get("hand_point"),
@@ -246,7 +246,7 @@ def guidance_lines(snap: dict) -> list:
 
     words = " ".join(st.words) or "-"
     lines = [
-        (f"COMMAND: {words}   wrist {st.wrist_hz:.1f} Hz   [{st.mode}]", (0, 220, 255)),
+        (f"COMMAND: {words}   pulsing {st.pulse_hz:.1f} Hz   [{st.mode}]", (0, 220, 255)),
         f"dx {f(st.dx)}  dy {f(st.dy)}  dz {f(st.dz)} {st.units or ''}   status {st.status}",
         f"distance: {st.distance}",
         f"depth: hand {f(d.get('hand'), '.2f')} target {f(d.get('target'), '.2f')} band {d.get('band') or '-'}"

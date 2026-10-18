@@ -1,4 +1,4 @@
-"""Step 4: step through each glove motor and the wrist pulse rates, with the live view showing which motor
+"""Step 4: step through each glove motor and the proximity pulse rates, with the live view showing which motor
 should be buzzing right now. Check each one by touch.
 
     python -m runtime.glove_check                                   # fake glove: wiring of the view only
@@ -35,8 +35,8 @@ class Step:
 
 
 def check_steps(hold_s: float = 1.5, gap_s: float = 0.5, pulse_s: float = 3.0, channels=None) -> list[Step]:
-    """Every channel the glove has steadily on, one at a time (with an off gap), in its wire order; then the
-    wrist at each pulse rate, if it has a wrist motor. channels: logical channels (default all 8)."""
+    """Every channel the glove has steadily on, one at a time (with an off gap), in its wire order; then one
+    direction motor (index = FORWARD) at each proximity pulse rate. channels: logical channels (default all 8)."""
     channels = tuple(range(8)) if channels is None else tuple(channels)
     steps: list[Step] = []
     for wire, ch in enumerate(channels):
@@ -44,11 +44,9 @@ def check_steps(hold_s: float = 1.5, gap_s: float = 0.5, pulse_s: float = 3.0, c
         steps.append(Step(f"{name} (wire channel {wire}) = {MEANING[ch]}: steady", GloveCommand(on=frozenset({ch})),
                           hold_s))
         steps.append(Step("off", OFF, gap_s))
-    if protocol.WRIST not in channels:
-        return steps
     for hz in PULSE_RATES:
-        steps.append(Step(f"wrist pulsing at {hz:g} Hz (faster = closer)",
-                          GloveCommand(pulse_hz={protocol.WRIST: hz}), pulse_s))
+        steps.append(Step(f"index (FORWARD) pulsing at {hz:g} Hz (proximity: faster = closer)",
+                          GloveCommand(pulse_hz={protocol.INDEX: hz}), pulse_s))
         steps.append(Step("off", OFF, gap_s))
     return steps
 

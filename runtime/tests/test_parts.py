@@ -141,8 +141,8 @@ class FakeLink:
     def start(self):
         self.calls.append(("start",))
 
-    def set(self, levels, wrist_hz=0.0):
-        self.calls.append(("set", list(levels), wrist_hz))
+    def set(self, levels, wrist_hz=0.0, pulse_hz=None):
+        self.calls.append(("set", list(levels), wrist_hz, dict(pulse_hz or {})))
 
     def off(self):
         self.calls.append(("off",))
@@ -151,17 +151,17 @@ class FakeLink:
         self.calls.append(("stop",))
 
 
-def test_hardware_glove_maps_on_off_and_wrist_pulse_to_the_link():
+def test_hardware_glove_maps_steady_and_pulsing_motors_to_the_link():
     link = FakeLink()
     glove = HardwareGlove(link=link, on_level=200)
     assert link.calls == [("start",)]
-    glove.apply(GloveCommand(on=frozenset({protocol.THUMB, protocol.PALM}), pulse_hz={protocol.WRIST: 3.0}))
-    _, levels, hz = link.calls[-1]
+    glove.apply(GloveCommand(on=frozenset({protocol.THUMB}), pulse_hz={protocol.PALM: 3.0, protocol.INDEX: 0.0}))
+    _, levels, wrist_hz, pulse = link.calls[-1]
     expected = [0] * 8
-    expected[protocol.THUMB] = expected[protocol.PALM] = expected[protocol.WRIST] = 200
-    assert levels == expected and hz == 3.0
+    expected[protocol.THUMB] = expected[protocol.PALM] = 200
+    assert levels == expected and wrist_hz == 0.0 and pulse == {protocol.PALM: 3.0}
     glove.apply(OFF)
-    assert link.calls[-1] == ("set", [0] * 8, 0.0)
+    assert link.calls[-1] == ("set", [0] * 8, 0.0, {})
     glove.all_off()
     assert link.calls[-1] == ("off",)
     glove.close()
