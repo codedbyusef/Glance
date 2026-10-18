@@ -5,8 +5,9 @@ read from **one depth map per frame**, so the two can be compared directly. Self
 `hand_detection/`: everything it needs is in this package.
 
 **Status: logic built and unit-tested on synthetic depth maps; the real model has not been run yet.**
-Nothing here is wired into object_detection, haptics or the agent. The tests and the fake model run
-with no GPU, torch or weights.
+Wired into the vision server by `object_detection/depth_hook.py` (integration Step 2): one model per
+server process, one `DepthTracker` per reach, readings in every progress message. The tests and the fake
+model run with no GPU, torch or weights.
 
 ## What depth is for
 
@@ -100,9 +101,9 @@ tracker.last_seen_depth(), tracker.closest_approach()
 `depth_regions.band_mask_from_marker(hand_marker.marker_mask(bgr) > 0, marker.box)`.
 Boxes are pixel `(x1, y1, x2, y2)`, masks are bool arrays the size of the frame.
 
-Open questions for integration (not decided here): the depth function signature
-`object_detection/session.py` expects; whether the server or the controller owns the final success
-decision; and how depth weights get into object_detection's Docker image.
+Decided at integration (root CLAUDE.md section 9): the session takes a per-reach `DepthProbe`
+(`object_detection/depth_hook.py`); the vision server's reach session owns success, using `touching`; the
+Docker image bakes the Small relative weights (`DEPTH_ID` in `object_detection/Dockerfile`).
 
 ## Walkthrough
 

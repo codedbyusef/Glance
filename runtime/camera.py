@@ -111,6 +111,13 @@ class CameraHub:
         with self._lock:
             return self._image
 
+    def newest_with_time(self) -> tuple[np.ndarray | None, float]:
+        """(newest image, its capture time on this hub's clock); (None, 0.0) before the warm-up ends."""
+        if not self.ready.is_set():
+            return None, 0.0
+        with self._lock:
+            return self._image, self._at
+
     def latest_frame(self) -> Frame | None:
         """The agent's Frame (guide_agent/CLAUDE.md section 5): JPEG, capped long edge, capture time."""
         if not self.ready.is_set():

@@ -51,6 +51,7 @@ class Sam2Tracker:
         self._session = None
         self._frame_idx = 0
         self._cond_idx = 0
+        self.last_mask: Optional[np.ndarray] = None  # bool (H, W) from the last update, None when lost
 
     def init(self, frame: np.ndarray, box: boxes.Box) -> None:
         """Start a fresh tracking session on `frame`, prompted with `box`."""
@@ -60,6 +61,7 @@ class Sam2Tracker:
         self._session = self.processor.init_video_session(inference_device=self.device, dtype=self.dtype)
         self._frame_idx = 0
         self._cond_idx = 0
+        self.last_mask = None
 
         inputs = self._prepare(frame)
         self.processor.add_inputs_to_inference_session(
@@ -76,6 +78,7 @@ class Sam2Tracker:
     def update(self, frame: np.ndarray) -> tuple[Optional[boxes.Box], float]:
         import torch
 
+        self.last_mask = None
         if self._session is None:
             return None, 0.0
 
@@ -95,10 +98,12 @@ class Sam2Tracker:
         height, width = frame.shape[:2]
         if score < self.min_score or mask.sum() < self.min_mask_frac * width * height:
             return None, score
+        self.last_mask = mask  # depth samples the target over the mask (free: already computed)
         return boxes.mask_to_box(mask), score
 
     def reset(self) -> None:
         self._session = None
+        self.last_mask = None
 
     def warmup(self) -> None:
         blank = np.zeros((360, 480, 3), dtype=np.uint8)

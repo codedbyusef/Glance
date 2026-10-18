@@ -9,3 +9,6 @@ build/
 .DS_Store
 *.env
 .env
+
+# live-test logs (JSONL per frame); copy numbers into the write-up
+runtime/logs/

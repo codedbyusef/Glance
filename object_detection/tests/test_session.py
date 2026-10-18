@@ -6,7 +6,7 @@ import numpy as np
 from object_detection.detector import Detection
 from object_detection.fake import FakeDetector, FakeTracker
 from object_detection.follow import TargetFollower
-from object_detection.session import HandReading, ReachSession
+from object_detection.session import DepthSample, HandReading, ReachSession
 
 FRAME = np.zeros((300, 300, 3), dtype=np.uint8)
 BOX = (100.0, 100.0, 200.0, 200.0)
@@ -19,7 +19,6 @@ CFG = {
     "stale_link_after_s": 0.5,
     "resume_reacquire_after_s": 3.0,
     "success_hold_frames": 3,
-    "depth_near_band": 0.1,
     "inferred_cover_frac": 0.5,
     "inferred_cover_frames": 2,
     "touching_dist_frac": 0.05,
@@ -39,7 +38,7 @@ def hit(score=0.6, box=BOX):
     return [Detection(box=box, score=score, label="paper")]
 
 
-def make(detector, tracker, hand_points, lost_frames=2, ambiguous_gap=0.0):
+def make(detector, tracker, hand_points, lost_frames=2, ambiguous_gap=0.0, depth=None):
     """hand_points: list consumed one per frame; None = no hand; last value repeats."""
     clock = Clock()
     points = list(hand_points)
@@ -49,7 +48,7 @@ def make(detector, tracker, hand_points, lost_frames=2, ambiguous_gap=0.0):
         return None if p is None else HandReading(point=p, box=(p[0] - 5, p[1] - 5, p[0] + 5, p[1] + 5))
 
     follower = TargetFollower(detector, tracker, lost_frames=lost_frames, ambiguous_gap=ambiguous_gap)
-    session = ReachSession("paper", "", follower, CFG, hand=hand, clock=clock)
+    session = ReachSession("paper", "", follower, CFG, hand=hand, depth=depth, clock=clock)
     return session, clock
 
 
@@ -202,3 +201,74 @@ def test_pause_freezes_timers_and_long_pause_reacquires():
     assert det.calls == 1
     run(s, c, 1)
     assert not s.done and det.calls == 2        # > resume_reacquire_after_s -> detector again
+
+
+# --- depth hook ----------------------------------------------------------------
+
+class ScriptedDepth:
+    """session.DepthProbe: one scripted (gap, touching) per frame (the last repeats); gap None = no reading."""
+
+    def __init__(self, script, last_seen="near", closest="near"):
+        self.script = list(script)
+        self.calls = []
+        self._last_seen, self._closest = last_seen, closest
+
+    def read(self, frame, frame_id, target_box, target_mask, hand):
+        self.calls.append((frame_id, target_box, target_mask, hand))
+        gap, touching = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+        return DepthSample(units="relative", hand=0.5, target=0.5 + (gap or 0), dz=gap, gap=gap,
+                           touching=touching, timings_ms={"depth_model": 1.0, "depth_sample": 0.5})
+
+    def last_seen_depth(self):
+        return self._last_seen
+
+    def closest_approach(self):
+        return self._closest
+
+
+def test_depth_touching_decides_success():
+    depth = ScriptedDepth([(0.2, False)] * 3 + [(0.01, True)])
+    s, clock = make(FakeDetector([hit()]), FakeTracker(), [(150, 150)], depth=depth)
+    report = run(s, clock, 4)
+    assert report.status == "success" and report.closest_approach == "touching"
+    assert len(depth.calls) == 4
+
+
+def test_in_box_without_depth_contact_is_not_success():
+    """With a depth gap the 2D rule doesn't apply: the hand hovering over the target is not a touch."""
+    depth = ScriptedDepth([(0.2, False)])
+    s, clock = make(FakeDetector([hit()]), FakeTracker(), [(150, 150)], depth=depth)
+    run(s, clock, 10)
+    assert not s.done
+
+
+def test_no_depth_reading_falls_back_to_the_2d_rule():
+    depth = ScriptedDepth([(None, False)])
+    s, clock = make(FakeDetector([hit()]), FakeTracker(), [(150, 150)], depth=depth)
+    assert run(s, clock, 5).status == "success"
+
+
+def test_progress_carries_depth_and_end_report_uses_it():
+    depth = ScriptedDepth([(0.3, False)], last_seen="far", closest="far")
+    s, clock = make(FakeDetector([hit()]), FakeTracker(), [(150, 150), None], depth=depth)
+    first = s.handle_frame(FRAME, 0)
+    assert first.depth["gap"] == 0.3 and first.depth["units"] == "relative" and "timings_ms" not in first.depth
+    assert first.timings_ms["depth_model"] == 1.0 and "depth" in first.timings_ms
+    assert first.frame_size == (300, 300) and first.hand_box == (145, 145, 155, 155)
+    report = run(s, clock, 30)
+    assert report.status == "hand_lost"
+    assert report.last_seen.depth == "far" and report.closest_approach == "far"
+
+
+def test_depth_gets_the_tracker_mask_when_there_is_one():
+    class MaskTracker(FakeTracker):
+        def update(self, frame):
+            self.last_mask = np.ones(frame.shape[:2], bool)
+            return super().update(frame)
+
+    depth = ScriptedDepth([(0.2, False)])
+    s, clock = make(FakeDetector([hit()]), MaskTracker(), [(150, 150)], depth=depth)
+    run(s, clock, 3)
+    acquire_call, track_call = depth.calls[0], depth.calls[1]
+    assert acquire_call[2] is None              # the acquiring frame has a box but no tracker mask yet
+    assert track_call[2] is not None and track_call[2].all()

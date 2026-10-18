@@ -6,8 +6,10 @@ has ended and why. End statuses and report fields match guide_agent/CLAUDE.md se
 (haptic_result) plus `cancelled` and the proposed `ambiguous`.
 
 The hand and depth readers are injected. hand_detection/ supplies the hand
-(`hand_reader()` below); depth is optional until Depth Anything V2 is added, and
-without it success is "fingertip in the box for N frames in a row".
+(`hand_reader()` below). Depth is a per-reach DepthProbe (object_detection/depth_hook.py,
+Depth Anything V2 + depth_estimation's DepthTracker). When a frame has a depth reading,
+success is depth's `touching` (hand in the box and the depth gap closed, held); without
+one it is "hand point in the box for N frames in a row".
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
 import numpy as np
 
@@ -29,10 +31,44 @@ from object_detection.follow import TargetFollower
 class HandReading:
     point: tuple[float, float]                         # fingertip / band center, pixels
     box: Optional[boxes.Box] = None                    # hand extent, for the cover rule
+    area_px: Optional[float] = None                    # band area (grows as the hand nears the camera)
 
 
 HandFn = Callable[[np.ndarray], Optional[HandReading]]
-DepthFn = Callable[[np.ndarray, list[tuple[float, float]]], list[Optional[float]]]
+
+
+@dataclass
+class DepthSample:
+    """One frame's depth reading, as the progress message carries it (depth_estimation's DepthReading).
+    Larger = farther; dz = target - hand; gap = dz - contact offset (~0 at contact)."""
+    units: str                                         # metric (meters) | relative (fraction of frame range)
+    hand: Optional[float] = None
+    target: Optional[float] = None
+    dz: Optional[float] = None
+    gap: Optional[float] = None
+    depth_error: Optional[float] = None                # gap in haptics controller units (wall mode)
+    band: Optional[str] = None                         # near | mid | far
+    touching: bool = False
+    target_frozen: bool = False
+    inconsistent: bool = False
+    map_age: int = 0                                   # frames since the depth map was computed
+    timings_ms: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d.pop("timings_ms")
+        return d
+
+
+class DepthProbe(Protocol):
+    """Depth for one reach (object_detection/depth_hook.py). Called once per frame."""
+
+    def read(self, frame: np.ndarray, frame_id: int, target_box: Optional[boxes.Box],
+             target_mask: Optional[np.ndarray], hand: Optional[HandReading]) -> Optional[DepthSample]: ...
+
+    def last_seen_depth(self) -> str: ...      # near | mid | far
+
+    def closest_approach(self) -> str: ...     # touching | near | far
 
 
 @dataclass
@@ -47,6 +83,10 @@ class FrameResult:
     hand_depth: Optional[float]
     reacquired: bool
     timings_ms: dict[str, float] = field(default_factory=dict)
+    frame_size: tuple[int, int] = (0, 0)               # (width, height) of the frame the pixels refer to
+    hand_box: Optional[boxes.Box] = None               # the band's box
+    band_area_px: Optional[float] = None
+    depth: Optional[dict] = None                       # DepthSample.to_dict(), None without a reading
 
 
 @dataclass
@@ -89,7 +129,7 @@ class ReachSession:
         follower: TargetFollower,
         cfg: dict,
         hand: Optional[HandFn] = None,
-        depth: Optional[DepthFn] = None,
+        depth: Optional[DepthProbe] = None,
         clock: Callable[[], float] = time.monotonic,
     ):
         self.session_id = str(uuid.uuid4())
@@ -114,6 +154,8 @@ class ReachSession:
         self.best_dist: Optional[float] = None
         self.best_dist_at = now
         self.success_streak = 0
+        self._depth_touching = False       # depth decided "touching" on the latest frame
+        self._depth_seen = False           # some frame had a depth gap: depth owns last_seen.depth/closest_approach
         self._cover_history: deque[bool] = deque(maxlen=max(1, int(cfg["inferred_cover_frames"]) + 2))
         self._candidates: list = []
         self._size = (0, 0)
@@ -164,6 +206,7 @@ class ReachSession:
         self._size = (width, height)
 
         box: Optional[boxes.Box] = None
+        target_mask: Optional[np.ndarray] = None
         confidence = 0.0
         reacquired = False
         reacquire_failed = False
@@ -175,11 +218,11 @@ class ReachSession:
             self._candidates = acq.candidates
             if acq.ambiguous:
                 self._end("ambiguous", frame_id)
-                return self._result(frame_id, None, 0.0, None, None, None, False, timings)
+                return self._result(frame_id, None, 0.0, None, None, False, timings)
             if acq.box is None:
                 if self._elapsed(now) > self.cfg["target_not_found_after_s"]:
                     self._end("target_not_found", frame_id)
-                return self._result(frame_id, None, 0.0, None, None, None, False, timings)
+                return self._result(frame_id, None, 0.0, None, None, False, timings)
             box, confidence = acq.box, acq.candidates[0].score
             self.target_seen_at = now
             self.phase = Phase.TRACKING
@@ -193,6 +236,8 @@ class ReachSession:
                 self._candidates = upd.candidates
             if box is not None:
                 self.target_seen_at = now
+                if not reacquired:  # the tracker's own mask for this box (SAM 2 only; None for CSRT)
+                    target_mask = getattr(self.follower.tracker, "last_mask", None)
 
         hand = None
         if self.hand is not None:
@@ -202,14 +247,16 @@ class ReachSession:
         if hand is not None:
             self.hand_seen_at = now
 
-        target_depth = hand_depth = None
-        if self.depth is not None and box is not None and hand is not None:
-            t = time.perf_counter()
-            target_depth, hand_depth = self.depth(frame, [boxes.center(box), hand.point])
-            timings["depth"] = (time.perf_counter() - t) * 1000
-
         # Progress: hand distance to the (last known) target box, as a fraction of the diagonal.
         ref_box = box or self.follower.last_box
+
+        sample: Optional[DepthSample] = None
+        if self.depth is not None and ref_box is not None:
+            t = time.perf_counter()
+            sample = self.depth.read(frame, frame_id, box, target_mask, hand)
+            timings["depth"] = (time.perf_counter() - t) * 1000
+            if sample is not None:
+                timings.update({k: v for k, v in sample.timings_ms.items() if k != "depth"})
         if hand is not None and ref_box is not None:
             dist = boxes.distance_to_box(ref_box, hand.point) / float(np.hypot(width, height))
             # Only a real improvement (1% of the diagonal) resets the stalled timer.
@@ -225,12 +272,18 @@ class ReachSession:
         )
         self._cover_history.append(covered)
 
+        # Success: depth's `touching` when this frame has a depth gap (it already needs the hand in the box,
+        # held for its hold_frames); otherwise the 2D rule, hand point in the box for success_hold_frames.
         in_box = box is not None and hand is not None and boxes.contains(box, hand.point)
-        depth_ok = target_depth is None or hand_depth is None or \
-            abs(target_depth - hand_depth) <= self.cfg.get("depth_near_band", 0.1)
-        self.success_streak = self.success_streak + 1 if (in_box and depth_ok) else 0
+        if sample is not None and sample.gap is not None:
+            self._depth_seen = True
+            self._depth_touching = sample.touching
+            self.success_streak = 0
+        else:
+            self._depth_touching = False
+            self.success_streak = self.success_streak + 1 if in_box else 0
 
-        result = self._result(frame_id, box, confidence, hand, target_depth, hand_depth, reacquired, timings)
+        result = self._result(frame_id, box, confidence, hand, sample, reacquired, timings)
         self._check_end(now, frame_id, box, reacquire_failed)
         return result
 
@@ -241,7 +294,7 @@ class ReachSession:
         recently_covered = sum(self._cover_history) >= cfg["inferred_cover_frames"]
         target_gone_s = now - self.target_seen_at if self.target_seen_at is not None else 0.0
 
-        if self.success_streak >= cfg["success_hold_frames"]:
+        if self._depth_touching or self.success_streak >= cfg["success_hold_frames"]:
             self._end("success", frame_id)
         elif box is None and recently_covered and (reacquire_failed or target_gone_s > cfg["target_lost_after_s"]):
             self._end("success", frame_id, inferred=True)
@@ -254,17 +307,21 @@ class ReachSession:
         elif self._elapsed(now) > cfg["timeout_s"]:
             self._end("timeout", frame_id)
 
-    def _result(self, frame_id, box, confidence, hand, target_depth, hand_depth, reacquired, timings) -> FrameResult:
+    def _result(self, frame_id, box, confidence, hand, sample, reacquired, timings) -> FrameResult:
         return FrameResult(
             session_id=self.session_id,
             frame_id=frame_id,
             target_box=box,
             confidence=float(confidence),
             hand_point=hand.point if hand is not None else None,
-            target_depth=target_depth,
-            hand_depth=hand_depth,
+            target_depth=sample.target if sample is not None else None,
+            hand_depth=sample.hand if sample is not None else None,
             reacquired=reacquired,
             timings_ms={k: round(v, 2) for k, v in timings.items()},
+            frame_size=self._size,
+            hand_box=hand.box if hand is not None else None,
+            band_area_px=hand.area_px if hand is not None else None,
+            depth=sample.to_dict() if sample is not None else None,
         )
 
     def _end(self, status: str, frame_id: Optional[int], inferred: bool = False) -> EndReport:
@@ -278,7 +335,7 @@ class ReachSession:
             width, height = self._size
             last_seen = LastSeen(
                 region=boxes.region_thirds(last_box, width, height),
-                depth=self._depth_band(last_box),
+                depth=self.depth.last_seen_depth() if self._depth_seen else self._depth_band(last_box),
                 age_s=round(now - self.target_seen_at, 2),
             )
         self.phase = Phase.DONE
@@ -289,7 +346,8 @@ class ReachSession:
             elapsed_s=round(self._elapsed(now), 2),
             target=self.target,
             last_seen=last_seen,
-            closest_approach="touching" if success else self._approach(),
+            closest_approach="touching" if success else (
+                self.depth.closest_approach() if self._depth_seen else self._approach()),
             frame_id=None if success else frame_id,
             candidate_count=len(self._candidates),
             top_scores=[round(c.score, 3) for c in self._candidates[:3]],
@@ -336,6 +394,7 @@ def hand_reader() -> Optional[HandFn]:
         info = hand_marker.detect(frame)
         if info is None:
             return None
-        return HandReading(point=tuple(info.point), box=tuple(float(v) for v in info.box))
+        return HandReading(point=tuple(info.point), box=tuple(float(v) for v in info.box),
+                           area_px=float(info.area_px))
 
     return read

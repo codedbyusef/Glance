@@ -45,19 +45,25 @@ _gpu_lock = asyncio.Lock()  # one GPU, one frame at a time
 
 def load_models() -> dict:
     cfg = load_config()
+    models: dict = {}
     if os.environ.get("GLANCE_FAKE_MODELS") == "1":
         from object_detection.fake import FakeDetector, FakeTracker
 
-        return {"detector": FakeDetector(), "tracker": FakeTracker()}
+        models.update(detector=FakeDetector(), tracker=FakeTracker())
+    else:
+        from object_detection.detector import GroundingDinoDetector
+        from object_detection.tracker import make_tracker
 
-    from object_detection.detector import GroundingDinoDetector
-    from object_detection.tracker import make_tracker
+        detector = GroundingDinoDetector(cfg["detector"])
+        tracker = make_tracker(cfg["tracker"])
+        detector.warmup()
+        tracker.warmup()
+        models.update(detector=detector, tracker=tracker)
+    if cfg.get("depth", {}).get("enabled", False):
+        from object_detection.depth_hook import load_depth_cache
 
-    detector = GroundingDinoDetector(cfg["detector"])
-    tracker = make_tracker(cfg["tracker"])
-    detector.warmup()
-    tracker.warmup()
-    return {"detector": detector, "tracker": tracker}
+        models["depth"] = load_depth_cache()  # fake model too under GLANCE_FAKE_MODELS=1 (no torch)
+    return models
 
 
 @asynccontextmanager
@@ -73,6 +79,9 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 def health():
     info = {"status": "ok", "models_loaded": bool(_models), "fake": os.environ.get("GLANCE_FAKE_MODELS") == "1"}
+    depth = _models.get("depth")
+    info["depth"] = None if depth is None else {
+        "kind": depth.model.kind, "device": depth.model.device, "every_n_frames": depth.every_n}
     try:
         import torch
 
@@ -93,7 +102,12 @@ def new_session(target: str, refer: str) -> ReachSession:
         reacquire_min_iou=float(cfg["tracker"]["reacquire_min_iou"]),
         ambiguous_gap=float(cfg["detector"]["ambiguous_gap"]),
     )
-    return ReachSession(target, refer, follower, cfg["reach_session"], hand=hand_reader())
+    depth = None
+    if _models.get("depth") is not None:
+        from object_detection.depth_hook import ReachDepth
+
+        depth = ReachDepth(_models["depth"], target)  # one DepthTracker per reach; the model is shared
+    return ReachSession(target, refer, follower, cfg["reach_session"], hand=hand_reader(), depth=depth)
 
 
 async def receive_latest(websocket: WebSocket, timeout: Optional[float]) -> dict:

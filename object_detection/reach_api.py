@@ -15,8 +15,9 @@ What it does:
   server's `frame_id` comes back as a full frame (the agent needs the image on failures).
 - Turns the server's `end` message into a ReachResult, field for field the agent's haptic_result.
 - Synthesizes `stale_link` when the link dies or the server goes quiet for `reach_api.no_reply_s`.
-- Passes `progress` messages (target box, hand point, timings) to `on_progress`, for the glove
-  controller once it exists.
+- Passes `progress` messages (target box, hand point, depth, timings) to `on_progress`, for the glove
+  controller. Each one gets a `client` dict with this side's timings for that frame: resize + JPEG
+  encode (encode_ms), send-to-reply round trip (round_trip_ms) and network_ms = round trip - server_ms.
 
 Callers are synchronous (like the agent's controller). The API runs its own asyncio loop in a
 background thread, and `on_result` / `on_progress` are called FROM THAT THREAD: hop to your own
@@ -92,6 +93,7 @@ class _Run:
         self.target = target
         self.started = time.monotonic()
         self.frames: collections.OrderedDict[int, ReachFrame] = collections.OrderedDict()
+        self.encode_ms: dict[int, float] = {}   # frame_id -> resize + JPEG time, until its progress arrives
         self.keep_frames = keep_frames
         self.resumed = asyncio.Event()
         self.resumed.set()
@@ -101,7 +103,8 @@ class _Run:
     def remember(self, frame_id: int, frame: ReachFrame) -> None:
         self.frames[frame_id] = frame
         while len(self.frames) > self.keep_frames:
-            self.frames.popitem(last=False)
+            old, _ = self.frames.popitem(last=False)
+            self.encode_ms.pop(old, None)
 
     def newest_frame(self) -> Optional[ReachFrame]:
         return next(reversed(self.frames.values()), None)
@@ -238,13 +241,16 @@ class ReachAPI:
                 image = self.frame_source()
                 if image is not None:
                     captured_at = time.time()
+                    t_enc = time.perf_counter()
                     if (image.shape[1], image.shape[0]) != self.frame_size:
                         image = cv2.resize(image, self.frame_size, interpolation=cv2.INTER_AREA)
                     jpeg = encode_jpeg(image, self.jpeg_quality)
+                    encode_ms = (time.perf_counter() - t_enc) * 1000
                     if run.done or not run.resumed.is_set():
                         continue
                     frame_id = await run.vc.send_frame(jpeg)
                     run.remember(frame_id, ReachFrame(id=f"vis-{frame_id}", image=jpeg, captured_at=captured_at))
+                    run.encode_ms[frame_id] = encode_ms
                 await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
         except asyncio.CancelledError:
             raise
@@ -263,7 +269,7 @@ class ReachAPI:
                 kind = msg.get("type")
                 if kind == "progress":
                     if self.on_progress is not None:
-                        self._call(self.on_progress, msg)
+                        self._call(self.on_progress, self._with_client_timings(run, msg))
                 elif kind == "end":
                     await self._finish(run, self._from_end(run, msg))
                 elif kind == "error":
@@ -300,6 +306,16 @@ class ReachAPI:
             except Exception:
                 pass
             await self._finish(run, None)
+
+    @staticmethod
+    def _with_client_timings(run: _Run, msg: dict) -> dict:
+        round_trip = (time.time() - float(msg.get("client_ts", time.time()))) * 1000
+        msg["client"] = {
+            "encode_ms": round(run.encode_ms.pop(msg.get("frame_id"), 0.0), 2),
+            "round_trip_ms": round(round_trip, 2),
+            "network_ms": round(round_trip - float(msg.get("server_ms", 0.0)), 2),
+        }
+        return msg
 
     def _from_end(self, run: _Run, msg: dict) -> ReachResult:
         frame = None

@@ -1,9 +1,11 @@
 # Settings for object detection + tracking. Starting values -- tune, not measured.
 
-# Frames as the laptop sends them to the server (JPEG). Widen if small objects are missed.
+# Frames as the laptop sends them to the server (JPEG). 640x480 matches hand_detection's and
+# depth_estimation's configs (hand_marker.min_area_px is in pixels at this size). Provisional until
+# scripts/bench_server.py is run on the GPU host (CLAUDE.md decision 15).
 frame:
-  frame_width: 480
-  frame_height: 360
+  frame_width: 640
+  frame_height: 480
   jpeg_quality: 70
 
 camera:
@@ -26,6 +28,10 @@ vultr:
   local_port: 8000      # laptop end of the SSH tunnel (GLANCE_LOCAL_PORT for the scripts)
   use_tunnel: true      # true: ws://localhost:<local_port> through `deploy/tunnel.sh`
                         # false: ws://<host>:<server_port> directly (open the firewall + set GLANCE_TOKEN)
+
+# Depth Anything V2 on the server (depth_estimation/config.yaml has the model, every_n_frames, thresholds).
+depth:
+  enabled: true         # false: no depth model; success falls back to the 2D rule
 
 server:
   device: auto          # auto | cuda | mps | cpu
@@ -58,8 +64,8 @@ reach_session:
   timeout_s: 28.0
   stale_link_after_s: 0.5
   resume_reacquire_after_s: 3.0
-  success_hold_frames: 7          # fingertip in box for this many frames in a row (5-10 band)
-  depth_near_band: 0.1            # |target depth - hand depth| for success, once a depth model is added
+  success_hold_frames: 7          # 2D rule, used on frames without a depth gap: hand point in box this many frames
+                                  # (with depth, success is depth_estimation's `touching`: in box + gap closed, held)
   inferred_cover_frac: 0.5        # hand box covers over half the last target box...
   inferred_cover_frames: 3        # ...for this many of the last frames before the target vanished
   touching_dist_frac: 0.05        # hand-to-box distance (fraction of frame diagonal) for closest_approach

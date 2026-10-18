@@ -103,6 +103,7 @@ $env:GLANCE_VISION_URL = "ws://100.112.104.87:8000/ws"; $env:GLANCE_TOKEN = "<to
 .venv\Scripts\python -m runtime.voice_agent                    # same with the wake word (needs headphones)
 .venv\Scripts\python -m runtime.voice_agent --typed            # type instead of talking; real TTS and camera
 .venv\Scripts\python -m runtime.latency                        # end of speech -> first audio, last session
+.venv\Scripts\python -m runtime.live_guidance --target "red can"  # Step 2: vision + depth + glove commands, no agent
 .venv\Scripts\python -m guide_agent.harness                     # agent, typed, stubbed I/O
 .venv\Scripts\python -m guide_agent.scripts.webcam_chat         # agent, typed, live camera
 .venv\Scripts\python -m guide_agent.evals.run --case halt --runs 1

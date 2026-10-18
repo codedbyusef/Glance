@@ -23,8 +23,15 @@ unknown, so it lives in `.env` as a placeholder (see below).
 5. Other endings: `hand_lost`, `stalled`, `timeout`, `stale_link`, `cancelled`
    (and `ambiguous`, off by default because the agent doesn't handle it yet).
 
-`refer` is accepted and ignored for now. Depth (Depth Anything V2) is not added yet: `session.py`
-takes a depth function when it exists; until then success = fingertip in the box for 7 frames.
+`refer` is accepted and ignored for now.
+
+**Depth** (integration Step 2): the server loads Depth Anything V2 once (`depth_hook.load_depth_cache`,
+settings in `depth_estimation/config.yaml`, `depth.enabled` here) and gives each reach its own
+`depth_estimation` `DepthTracker` (`depth_hook.ReachDepth`). The hand is sampled over the band's own pixels,
+the target over SAM 2's mask (or the box for CSRT). On frames with a depth gap, success is depth's `touching`
+(hand point in the box and the gap closed, held for `touching.hold_frames`); otherwise the 2D rule above
+(`success_hold_frames`). With depth, the end report's `last_seen.depth` and `closest_approach` come from
+the depth tracker.
 
 ## Files
 
@@ -38,6 +45,8 @@ takes a depth function when it exists; until then success = fingertip in the box
 | `client.py` | Laptop client library + `--health` / live webcam check. |
 | `reach_api.py` | Synchronous `start/pause/resume/cancel` + result callback for the agent (see "Agent integration"). |
 | `boxes.py` | All box conversion and geometry, in one tested place. |
+| `depth_hook.py` | Depth for the reach session: the shared Depth Anything V2 cache and a `DepthTracker` per reach. |
+| `scripts/bench_server.py` | Per-frame server time with every model loaded, and hand detection, per frame size (run on the GPU host). |
 | `fake.py` | Canned detector/tracker for tests and wiring checks (`GLANCE_FAKE_MODELS=1`). |
 | `config.yaml` | Model ids, thresholds, timers, frame size, Vultr ports. |
 | `Dockerfile` | CUDA image with weights baked in. Build from the repo root. |
@@ -69,8 +78,11 @@ api.pause(session_id); api.resume(session_id); api.cancel(session_id)
 - `cancel` -> a `cancelled` result (the agent drops those). `pause` stops frames and freezes timers.
 - `on_result` and `on_progress` run on the API's own thread; hop to your loop with
   `loop.call_soon_threadsafe`.
-- `on_progress` gets each per-frame `progress` message (target box, hand point, timings): the input
-  for the glove controller, which does not exist yet.
+- `on_progress` gets each per-frame `progress` message: `target_box`, `hand_point`, `hand_box`,
+  `band_area_px`, `frame_size`, `depth` (`hand`, `target`, `dz`, `gap`, `depth_error`, `band`, `touching`,
+  `units`, `target_frozen`, `inconsistent`, `map_age`, or null), `timings_ms` (detect/track, hand, depth,
+  depth_model, band_mask, depth_sample), `server_ms`, and a `client` dict added on this side (`encode_ms`,
+  `round_trip_ms`, `network_ms`). `runtime/guidance.py` turns it into glove commands.
 
 Connecting it to the agent later is a small adapter in the agent (not written yet): `ReachStartError`
 -> `HapticStartError`, `ReachResult` -> `guide_agent.schemas.HapticResult` (same field names;

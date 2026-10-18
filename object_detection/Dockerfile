@@ -17,10 +17,12 @@ RUN pip install --no-cache-dir \
     opencv-contrib-python-headless
 
 # Bake the weights into the image so the instance never downloads at startup.
-# Keep these ids in sync with object_detection/config.yaml.
+# Keep these ids in sync with object_detection/config.yaml (and depth_estimation/config.yaml for depth).
 ARG DETECTOR_ID=IDEA-Research/grounding-dino-tiny
 ARG TRACKER_ID=facebook/sam2.1-hiera-tiny
-RUN python -c "from huggingface_hub import snapshot_download as d; d('${DETECTOR_ID}'); d('${TRACKER_ID}')"
+# Depth Anything V2: keep in sync with depth_estimation/config.yaml model.kind / model.ids
+ARG DEPTH_ID=depth-anything/Depth-Anything-V2-Small-hf
+RUN python -c "from huggingface_hub import snapshot_download as d; d('${DETECTOR_ID}'); d('${TRACKER_ID}'); d('${DEPTH_ID}')"
 
 # The packages import each other package-qualified (object_detection, hand_detection, depth_estimation),
 # so they sit side by side under /app, which is the working directory and on sys.path.
