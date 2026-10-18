@@ -132,9 +132,64 @@ def test_fake_glove_draws_idle_and_active_panels():
     assert glove.command == OFF
 
 
-def test_hardware_glove_is_a_clear_stub():
-    with pytest.raises(NotImplementedError, match="Step 4"):
+class FakeLink:
+    """haptics.link.GloveLink's surface, recording calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def start(self):
+        self.calls.append(("start",))
+
+    def set(self, levels, wrist_hz=0.0):
+        self.calls.append(("set", list(levels), wrist_hz))
+
+    def off(self):
+        self.calls.append(("off",))
+
+    def stop(self):
+        self.calls.append(("stop",))
+
+
+def test_hardware_glove_maps_on_off_and_wrist_pulse_to_the_link():
+    link = FakeLink()
+    glove = HardwareGlove(link=link, on_level=200)
+    assert link.calls == [("start",)]
+    glove.apply(GloveCommand(on=frozenset({protocol.THUMB, protocol.PALM}), pulse_hz={protocol.WRIST: 3.0}))
+    _, levels, hz = link.calls[-1]
+    expected = [0] * 8
+    expected[protocol.THUMB] = expected[protocol.PALM] = expected[protocol.WRIST] = 200
+    assert levels == expected and hz == 3.0
+    glove.apply(OFF)
+    assert link.calls[-1] == ("set", [0] * 8, 0.0)
+    glove.all_off()
+    assert link.calls[-1] == ("off",)
+    glove.close()
+    assert link.calls[-1] == ("stop",)
+
+
+def test_hardware_glove_without_a_port_says_where_to_set_it():
+    with pytest.raises(ValueError, match="glove.port"):
         HardwareGlove()
+
+
+def test_make_glove_and_tee():
+    from runtime.glove_out import TeeGlove, make_glove
+
+    assert isinstance(make_glove("fake"), FakeGlove)
+    with pytest.raises(ValueError):
+        make_glove("laser")
+    link, panel = FakeLink(), FakeGlove()
+    tee = TeeGlove(HardwareGlove(link=link), panel)
+    tee.apply(GloveCommand(on=frozenset({protocol.INDEX})))
+    assert panel.command.on == frozenset({protocol.INDEX}) and link.calls[-1][0] == "set"
+    tee.all_off()
+    assert panel.command == OFF and link.calls[-1] == ("off",)
+    img = np.zeros((220, 200, 3), np.uint8)
+    tee.draw(img, (0, 0))
+    assert img.any()
+    tee.close()
+    assert link.calls[-1] == ("stop",)
 
 
 # ------------------------------------------------------------------ camera

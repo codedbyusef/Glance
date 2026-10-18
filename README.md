@@ -36,7 +36,7 @@ relative to its own file), its tests in `<package>/tests/`, and its runnable too
 | `hand_detection/` | Green tape band tracker (the hand point) | `hand_detection/README.md` |
 | `depth_estimation/` | Depth Anything V2 Small + `DepthTracker` | `depth_estimation/README.md` |
 | `haptics/` | `GuidanceController` (pixels -> motor commands), glove link, wire protocol | `haptics/CLAUDE.md` |
-| `runtime/` | Integration glue: camera hub, live view, glove output, `voice_agent.py` (Step 1) | `CLAUDE.md` |
+| `runtime/` | Integration glue: camera hub, live view, glove output, `voice_agent.py`, `live_guidance.py`, `reach_haptic.py`, `glove_check.py`, `selftest.py`, Pi install | `CLAUDE.md` |
 | `firmware/glove/` | ESP32 sketch | `haptics/CLAUDE.md` |
 
 ## Requirements by machine role
@@ -141,6 +141,36 @@ need torch for the real model, so run them in `.venv-vision` (or with `GLANCE_FA
 3. **Without the agent** (tune vision, depth and guidance): `python -m runtime.live_guidance --target "red can"`.
 4. **Without a GPU** (wiring only): run the vision server locally with `$env:GLANCE_FAKE_MODELS = "1"` and
    point `GLANCE_VISION_URL` at `ws://127.0.0.1:8000/ws`.
+
+## Raspberry Pi (worn by the user)
+
+```bash
+git clone <repo> ~/Glance && cd ~/Glance && git checkout integration
+bash runtime/scripts/install_pi.sh            # apt deps, .venv (no torch), openwakeword --no-deps, models
+. .venv/bin/activate
+export GLANCE_STT_URL=http://100.112.104.87:8001 GLANCE_STT_TOKEN=<token>
+export GLANCE_VISION_URL=ws://100.112.104.87:8000/ws GLANCE_TOKEN=<token> GEMINI_API_KEY=<key>
+python -m runtime.selftest                    # env, camera, STT, vision, glove, audio: PASS/WARN/FAIL
+python -m runtime.voice_agent --reach real    # the live view is at http://<pi>:8090/ (web is the default
+                                              # without a display); keys: a letter + Enter in the terminal
+```
+
+Per-machine settings (camera index or `picam` for the camera module, glove port) go in
+`runtime/config.local.yaml` (gitignored); the install script creates one with `camera.source: 0`.
+
+## Hardware glove
+
+The glove is driven over USB serial (`haptics/link.py`, protocol in `haptics/protocol.py`, firmware in
+`firmware/glove/glove.ino`). Motors are on or off; the wrist pulses faster as the hand gets closer.
+
+```powershell
+.venv\Scripts\python -m runtime.glove_check --glove hardware --glove-port COM5      # each motor, then pulse rates
+.venv\Scripts\python -m runtime.voice_agent --reach real --glove hardware --glove-port COM5
+.venv\Scripts\python -m runtime.live_guidance --target "red can" --glove hardware --glove-port COM5
+```
+
+Or set `glove: {kind: hardware, port: COM5}` in `runtime/config.local.yaml`. The live view still draws the
+motors, mirroring what the glove was told.
 
 ## Out of scope for the weekend
 

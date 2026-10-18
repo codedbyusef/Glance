@@ -1,7 +1,14 @@
-# Runtime (client) settings. Paths are relative to the repo root.
+# Runtime (client) settings, shared by every machine. Per-machine overrides (the Pi's camera, the glove's
+# serial port) go in runtime/config.local.yaml (gitignored), with the same keys, e.g.
+#   camera:
+#     source: 0
+#   glove:
+#     kind: hardware
+#     port: /dev/ttyUSB0
 
 camera:
-  source: 1            # webcam index (1 = the Logitech Brio on the laptop, 0 = the built-in webcam), or a video path/URL
+  source: 1            # webcam index (1 = the Logitech Brio on the laptop, 0 = the built-in webcam),
+                       # "picam" for the Pi camera module (Picamera2), or a video path/URL
   width: 1280
   height: 720
   dshow: true          # Windows: open webcams with CAP_DSHOW (faster to open, honors the size)
@@ -11,3 +18,8 @@ camera:
 view:
   web_port: 8090       # --view web: MJPEG at http://<host>:8090/
   width: 960           # displayed width of the live view (the camera frame is scaled to it)
+
+glove:
+  kind: fake           # fake (drawn on the live view) | hardware (USB serial, Step 4)
+  port: null           # hardware: serial port, e.g. COM5 or /dev/ttyUSB0
+  on_level: 255        # PWM level for an "on" motor (motors are on or off)

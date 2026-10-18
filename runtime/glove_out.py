@@ -90,15 +90,70 @@ class FakeGlove:
 
 
 class HardwareGlove:
-    """The real glove, on the teammates' per-motor on/off functions (Step 4)."""
+    """The real glove over USB serial (Step 4), through haptics.link.GloveLink and the firmware protocol in
+    haptics/protocol.py: a steady channel is sent at on_level, an off channel at 0. GloveLink resends the
+    latest levels at 50 Hz on its own thread and gates the wrist on/off at its pulse rate in software
+    (link.frame_at), so apply() only stores the command and never blocks. The firmware turns every motor
+    off if no frame arrives for 300 ms, so a crashed process can't leave a motor on.
 
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError(
-            "HardwareGlove is built in Step 4 (it wraps the teammates' per-motor on/off functions). "
-            "Use the fake glove (the default) until then.")
+    Only the wrist can pulse (GloveLink gates only WRIST); any other channel in pulse_hz is sent steady on."""
+
+    def __init__(self, port: str | None = None, on_level: int = 255, link=None):
+        if link is None:
+            if not port:
+                raise ValueError("HardwareGlove needs a serial port: set glove.port in runtime/config.local.yaml "
+                                 "or pass --glove-port (e.g. COM5, /dev/ttyUSB0)")
+            from haptics.link import GloveLink
+
+            link = GloveLink(port)
+        self.link = link
+        self.on_level = int(on_level)
+        self.link.start()
 
     def apply(self, cmd: GloveCommand) -> None:
-        raise NotImplementedError
+        levels = [0] * 8
+        for ch in cmd.on | set(ch for ch, hz in cmd.pulse_hz.items() if hz > 0):
+            levels[ch] = self.on_level
+        self.link.set(levels, cmd.pulse_hz.get(protocol.WRIST, 0.0))
 
     def all_off(self) -> None:
-        raise NotImplementedError
+        self.link.off()  # zero levels now, plus the firmware's all-off command
+
+    def close(self) -> None:
+        self.link.stop()  # sends all-off, closes the port
+
+
+class TeeGlove:
+    """Several outputs as one: the real glove plus the FakeGlove panel that shows what it was told."""
+
+    def __init__(self, *outputs):
+        self.outputs = outputs
+
+    def apply(self, cmd: GloveCommand) -> None:
+        for o in self.outputs:
+            o.apply(cmd)
+
+    def all_off(self) -> None:
+        for o in self.outputs:
+            o.all_off()
+
+    def close(self) -> None:
+        for o in self.outputs:
+            close = getattr(o, "close", None)
+            if close is not None:
+                close()
+
+    def draw(self, img: np.ndarray, origin: tuple[int, int]) -> None:
+        for o in self.outputs:
+            if hasattr(o, "draw"):
+                o.draw(img, origin)
+                return
+
+
+def make_glove(kind: str, port: str | None = None, on_level: int = 255):
+    """The live scripts' glove: fake -> FakeGlove; hardware -> HardwareGlove mirrored on a FakeGlove panel."""
+    if kind == "fake":
+        return FakeGlove()
+    if kind == "hardware":
+        return TeeGlove(HardwareGlove(port, on_level), FakeGlove())
+    raise ValueError(f"glove kind must be fake or hardware, not {kind!r}")

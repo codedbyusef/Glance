@@ -29,7 +29,7 @@ import cv2
 import numpy as np
 
 from . import config as runtime_config
-from .glove_out import FakeGlove, GloveOutput
+from .glove_out import GloveOutput, make_glove
 from .guidance import Guidance, GuidanceState
 from .keys import StdinRouter
 from .view import FpsCounter, Timings, View, blank, fit_width, text_panel
@@ -263,10 +263,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Live vision + depth + guidance, no agent.")
     parser.add_argument("--target", required=True, help='detector phrase, e.g. "red can"')
     parser.add_argument("--refer", default="", help="what tells it apart (accepted, unused by the server for now)")
-    parser.add_argument("--view", choices=("window", "web", "none"), default="window")
+    parser.add_argument("--view", choices=("window", "web", "none"), default=runtime_config.default_view())
     parser.add_argument("--camera", help="camera index or video path (default: runtime/config.yaml)")
     parser.add_argument("--mode", choices=("table", "wall"), default="table")
     parser.add_argument("--log", help="JSONL path (default runtime/logs/guidance-<time>.jsonl)")
+    parser.add_argument("--glove", choices=("fake", "hardware"), help="default: glove.kind in runtime/config")
+    parser.add_argument("--glove-port", help="serial port for --glove hardware (default: glove.port)")
     args = parser.parse_args(argv)
 
     from object_detection.common import load_config as od_config
@@ -288,7 +290,8 @@ def main(argv: list[str] | None = None) -> None:
 
     log_path = Path(args.log) if args.log else LOG_DIR / f"guidance-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     log = FrameLog(log_path)
-    glove = FakeGlove()
+    glove = make_glove(args.glove or rt["glove"]["kind"], args.glove_port or rt["glove"]["port"],
+                       rt["glove"]["on_level"])
     timings = Timings()
     loop = ReachLoop(lambda on_result, on_progress: ReachAPI(on_result, frame_source, on_progress),
                      Guidance.from_config(args.mode), glove, log, timings,
@@ -343,6 +346,8 @@ def main(argv: list[str] | None = None) -> None:
         pass
     finally:
         loop.close()
+        if hasattr(glove, "close"):
+            glove.close()
         camera.stop()
         view.close()
         print(log.summary(), flush=True)

@@ -12,3 +12,5 @@ build/
 
 # live-test logs (JSONL per frame); copy numbers into the write-up
 runtime/logs/
+# per-machine runtime settings (camera index, glove port)
+runtime/config.local.yaml

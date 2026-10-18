@@ -19,8 +19,36 @@ import numpy as np
 from guide_agent.schemas import Frame
 
 
+class PiCamera2Capture:
+    """The Raspberry Pi camera module through Picamera2 (apt: python3-picamera2), with VideoCapture's
+    read()/release(). "RGB888" is BGR byte order in Picamera2, which is what OpenCV expects."""
+
+    def __init__(self, width: int, height: int):
+        from picamera2 import Picamera2  # only on the Pi
+
+        self.cam = Picamera2()
+        self.cam.configure(self.cam.create_video_configuration(main={"size": (width, height), "format": "RGB888"}))
+        self.cam.start()
+
+    def read(self):
+        try:
+            return True, self.cam.capture_array()
+        except Exception:
+            return False, None
+
+    def release(self) -> None:
+        self.cam.stop()
+        self.cam.close()
+
+
 def open_capture(source, width: int, height: int, dshow: bool = True):
-    """cv2.VideoCapture for a webcam index or a video path/URL."""
+    """cv2.VideoCapture for a webcam index or a video path/URL; PiCamera2Capture for "picam"."""
+    if source == "picam":
+        try:
+            return PiCamera2Capture(width, height)
+        except Exception as e:
+            raise SystemExit(f"could not open the Pi camera ({e!r}); is python3-picamera2 installed "
+                             f"and the venv made with --system-site-packages?")
     if isinstance(source, int) or (isinstance(source, str) and source.isdigit()):
         index = int(source)
         cap = cv2.VideoCapture(index, cv2.CAP_DSHOW) if (dshow and sys.platform == "win32") else cv2.VideoCapture(index)
