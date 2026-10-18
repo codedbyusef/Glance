@@ -105,8 +105,17 @@ class GloveLink:
     def _loop(self):
         period = 1.0 / self.rate_hz
         next_t = time.monotonic()
+        warned = False
         while self._running:
-            self._write(self.wire_frame_at(time.monotonic()))
+            try:
+                self._write(self.wire_frame_at(time.monotonic()))
+                warned = False
+            except Exception as e:  # e.g. write timeout: the firmware isn't reading (code.py not running)
+                if not warned:
+                    print(f"[glove] write failed ({e!r}); is code.py running on the glove? retrying", flush=True)
+                    warned = True
+                time.sleep(0.5)
+                next_t = time.monotonic()
             next_t += period
             time.sleep(max(0.0, next_t - time.monotonic()))
 
