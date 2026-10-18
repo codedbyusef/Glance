@@ -28,6 +28,8 @@ from runtime.voice_agent import App
 LOUD = np.full(1280, 3000, np.int16)
 QUIET = np.zeros(1280, np.int16)
 B = 0.08
+WARM_TIMEOUT_S = 60.0   # one-time cost: the Player's synth thread imports scipy and caches the fixed phrases
+WAIT_TIMEOUT_S = 20.0   # behaviour waits; they return as soon as the condition holds, so headroom is free
 SPEECH_SAMPLES = 8000  # more than the thinking cue writes: the speech itself is playing
 LONG = "Take two small steps forward and keep your hands low in front of you. " * 4  # ~3 s with FakeSynth
 
@@ -60,6 +62,14 @@ class FakeCamera:
         return None
 
 
+def start_warm(player, app) -> None:
+    """Start the Player and wait for its warm-up before the App takes input, as runtime.voice_agent does, so
+    the one-time scipy import and fixed-phrase cache never eat into a behaviour wait."""
+    player.start()
+    assert player.warm.wait(WARM_TIMEOUT_S), "Player warm-up did not finish"
+    app.start()
+
+
 class Rig:
     def __init__(self, model, texts, scores=None, ptt_only=False):
         import asyncio
@@ -81,8 +91,7 @@ class Rig:
                        mic_factory=mic_factory, tick_s=0.02, loop=loop)
         self.mic = self.app.mic
         self.t = time.time()
-        self.player.start()
-        self.app.start()
+        start_warm(self.player, self.app)
 
     def push(self, bs, ptt=None):
         """Feed 80 ms blocks to the Mic; ptt maps a block index to a press (True) or release (False)."""
@@ -98,7 +107,7 @@ class Rig:
     def step(self):
         return self.ctl(lambda c: c.step)
 
-    def wait(self, pred, timeout=8.0, what=""):
+    def wait(self, pred, timeout=WAIT_TIMEOUT_S, what=""):
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             if pred():
@@ -218,8 +227,7 @@ def test_real_reach_path_start_progress_result_through_the_controller(rigs):
             self.app = App(AgentConfig(assistant_name="Glance"), model, self.player, self.camera,
                            glove=holder["glove"], tick_s=0.02, loop=loop, haptic_factory=haptic_factory)
             self.mic = None
-            self.player.start()
-            self.app.start()
+            start_warm(self.player, self.app)
 
     r = RealReachRig()
     rigs.append(r)
