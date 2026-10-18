@@ -86,7 +86,7 @@ def main():
     quality = cfg["frame"]["jpeg_quality"]
 
     src = args.video or (args.cam if args.cam is not None else cfg["camera"]["source"])
-    cap = cv2.VideoCapture(int(src) if str(src).isdigit() else src)
+    cap = (cv2.VideoCapture(int(src), cv2.CAP_DSHOW) if sys.platform == "win32" else cv2.VideoCapture(int(src))) if str(src).isdigit() else cv2.VideoCapture(src)  # DirectShow: the Windows default backend can hang opening USB webcams
     if not cap.isOpened():
         sys.exit(f"Could not open camera/video: {src}")
 

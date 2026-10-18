@@ -14,6 +14,7 @@ CFG = {
     "target_not_found_after_s": 3.0,
     "target_lost_after_s": 2.0,
     "hand_lost_after_s": 1.5,
+    "hand_first_seen_s": 4.0,
     "stalled_after_s": 7.0,
     "timeout_s": 28.0,
     "stale_link_after_s": 0.5,
@@ -160,6 +161,21 @@ def test_hand_lost():
     s, c = make(FakeDetector([hit()]), FakeTracker(), [(10, 10), None])
     r = run(s, c, 40)
     assert r.status == "hand_lost"
+
+
+def test_hand_never_seen_waits_for_first_sighting():
+    # 3 s with no hand: past hand_lost_after_s but inside hand_first_seen_s, so still running
+    s, c = make(FakeDetector([hit()]), FakeTracker(), [None] * 30 + [(10, 10)])
+    run(s, c, 30)
+    assert not s.done
+    s, c = make(FakeDetector([hit()]), FakeTracker(), [None])
+    assert run(s, c, 60).status == "hand_lost" and c.t > 4.0
+
+
+def test_short_dropout_after_sighting_keeps_running():
+    s, c = make(FakeDetector([hit()]), FakeTracker(), [(10, 10)] + [None] * 10 + [(10, 10)])
+    run(s, c, 20)
+    assert not s.done or s.end_report.status != "hand_lost"
 
 
 def test_stalled_when_hand_stops_getting_closer():

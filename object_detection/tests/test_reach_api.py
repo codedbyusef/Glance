@@ -46,6 +46,8 @@ def serve(monkeypatch, depth: bool):
 
     cfg = copy.deepcopy(load_config())
     cfg["depth"]["enabled"] = depth
+    cfg["reach_session"]["hand_lost_after_s"] = 1.5   # plumbing tests: keep the hand_lost paths fast
+    cfg["reach_session"]["hand_first_seen_s"] = 1.5
     monkeypatch.setattr(server, "load_config", lambda: cfg)
     monkeypatch.setenv("GLANCE_FAKE_MODELS", "1")
     monkeypatch.delenv("GLANCE_TOKEN", raising=False)

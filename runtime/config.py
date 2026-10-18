@@ -15,7 +15,8 @@ CONFIG_PATH = RUNTIME_DIR / "config.yaml"
 LOCAL_PATH = RUNTIME_DIR / "config.local.yaml"
 
 DEFAULTS = {
-    "camera": {"source": 1, "width": 1280, "height": 720, "dshow": True, "warmup_frames": 45, "jpeg_quality": 85},
+    "camera": {"source": 1, "width": 1280, "height": 720, "dshow": True, "fourcc": "MJPG", "fps": 30,
+               "warmup_frames": 45, "jpeg_quality": 85},
     "view": {"web_port": 8090, "width": 960},
     "glove": {"kind": "fake", "port": None, "on_level": 255},
 }

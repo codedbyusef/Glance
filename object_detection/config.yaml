@@ -59,7 +59,8 @@ tracker:
 reach_session:
   target_not_found_after_s: 3.0
   target_lost_after_s: 2.0
-  hand_lost_after_s: 1.5
+  hand_lost_after_s: 3.0         # hand out of view this long (after it was seen) -> hand_lost
+  hand_first_seen_s: 6.0         # wait this long for the first sighting of the hand -> hand_lost
   stalled_after_s: 7.0
   timeout_s: 28.0
   stale_link_after_s: 0.5

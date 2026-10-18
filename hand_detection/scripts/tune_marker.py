@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import time
 
+import sys
 import cv2
 import numpy as np
 
@@ -42,7 +43,7 @@ def main():
     ap.add_argument("--cam", default=None)
     args = ap.parse_args()
     src = args.cam if args.cam is not None else SETTINGS["camera"]["source"]
-    cap = cv2.VideoCapture(int(src) if str(src).isdigit() else src)
+    cap = (cv2.VideoCapture(int(src), cv2.CAP_DSHOW) if sys.platform == "win32" else cv2.VideoCapture(int(src))) if str(src).isdigit() else cv2.VideoCapture(src)  # DirectShow: the Windows default backend can hang opening USB webcams
 
     cfg = hand._load_cfg()
     cv2.namedWindow(WIN)

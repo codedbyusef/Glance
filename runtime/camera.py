@@ -41,8 +41,12 @@ class PiCamera2Capture:
         self.cam.close()
 
 
-def open_capture(source, width: int, height: int, dshow: bool = True):
-    """cv2.VideoCapture for a webcam index or a video path/URL; PiCamera2Capture for "picam"."""
+def open_capture(source, width: int, height: int, dshow: bool = True, fourcc: str | None = "MJPG",
+                 fps: float | None = 30):
+    """cv2.VideoCapture for a webcam index or a video path/URL; PiCamera2Capture for "picam".
+
+    Webcams ask for MJPG: OpenCV's default uncompressed YUY2 at 1280x720 caps many USB webcams at ~5 FPS.
+    """
     if source == "picam":
         try:
             return PiCamera2Capture(width, height)
@@ -56,8 +60,15 @@ def open_capture(source, width: int, height: int, dshow: bool = True):
         cap = cv2.VideoCapture(str(source))
     if not cap.isOpened():
         raise SystemExit(f"could not open camera {source!r} (wrong index? try --camera 0)")
+    is_webcam = isinstance(source, int) or (isinstance(source, str) and source.isdigit())
+    if is_webcam and fourcc:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if is_webcam and fourcc:  # some DirectShow drivers only honor the format after the size is set
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+    if is_webcam and fps:
+        cap.set(cv2.CAP_PROP_FPS, fps)
     return cap
 
 
@@ -95,7 +106,7 @@ class CameraHub:
     @classmethod
     def from_config(cls, cam_cfg: dict, max_long_edge: int, source=None) -> "CameraHub":
         cap = open_capture(cam_cfg["source"] if source is None else source, cam_cfg["width"], cam_cfg["height"],
-                           cam_cfg.get("dshow", True))
+                           cam_cfg.get("dshow", True), cam_cfg.get("fourcc", "MJPG"), cam_cfg.get("fps", 30))
         return cls(cap, max_long_edge, cam_cfg["warmup_frames"], cam_cfg["jpeg_quality"])
 
     # ---------------------------------------------------------------- lifecycle

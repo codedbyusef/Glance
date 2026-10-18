@@ -151,6 +151,7 @@ class ReachSession:
         self._phase_before_pause = Phase.ACQUIRING
         self.target_seen_at: Optional[float] = None
         self.hand_seen_at = now
+        self._hand_ever_seen = False      # before the first sighting, hand_first_seen_s applies instead
         self.best_dist: Optional[float] = None
         self.best_dist_at = now
         self.success_streak = 0
@@ -246,6 +247,7 @@ class ReachSession:
             timings["hand"] = (time.perf_counter() - t) * 1000
         if hand is not None:
             self.hand_seen_at = now
+            self._hand_ever_seen = True
 
         # Progress: hand distance to the (last known) target box, as a fraction of the diagonal.
         ref_box = box or self.follower.last_box
@@ -300,12 +302,18 @@ class ReachSession:
             self._end("success", frame_id, inferred=True)
         elif box is None and target_gone_s > cfg["target_lost_after_s"]:
             self._end("target_lost", frame_id)
-        elif self.hand is not None and now - self.hand_seen_at > cfg["hand_lost_after_s"]:
+        elif self.hand is not None and now - self.hand_seen_at > self._hand_limit_s():
             self._end("hand_lost", frame_id)
         elif self.best_dist is not None and now - self.best_dist_at > cfg["stalled_after_s"]:
             self._end("stalled", frame_id)
         elif self._elapsed(now) > cfg["timeout_s"]:
             self._end("timeout", frame_id)
+
+    def _hand_limit_s(self) -> float:
+        """Dropout allowed once the hand was seen; a longer wait before the first sighting (the user is
+        still bringing the hand into view while the target is being detected)."""
+        lost = float(self.cfg["hand_lost_after_s"])
+        return lost if self._hand_ever_seen else float(self.cfg.get("hand_first_seen_s", lost))
 
     def _result(self, frame_id, box, confidence, hand, sample, reacquired, timings) -> FrameResult:
         return FrameResult(

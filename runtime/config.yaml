@@ -12,6 +12,8 @@ camera:
   width: 1280
   height: 720
   dshow: true          # Windows: open webcams with CAP_DSHOW (faster to open, honors the size)
+  fourcc: MJPG         # webcams: compressed MJPG; the default YUY2 at 1280x720 caps USB webcams at ~5 FPS
+  fps: 30              # requested webcam frame rate
   warmup_frames: 45    # the first frames come out dark while auto-exposure settles
   jpeg_quality: 85     # agent frames; their long edge is capped by guide_agent's frame_max_long_edge_px
 
