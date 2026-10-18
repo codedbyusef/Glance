@@ -49,6 +49,7 @@ def test_glove_check_covers_every_channel_then_every_pulse_rate():
 def test_selftest_offline_paths(monkeypatch):
     selftest.RESULTS.clear()
     monkeypatch.delenv("GLANCE_STT_URL", raising=False)
+    monkeypatch.setattr("runtime.glove_out.find_glove_port", lambda ports=None: None)  # ignore a real glove
     selftest.check_stt()
     selftest.check_glove("fake", None, 255)
     selftest.check_glove("hardware", None, 255)  # no port: a clear FAIL, not a crash

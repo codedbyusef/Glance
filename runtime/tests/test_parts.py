@@ -168,7 +168,8 @@ def test_hardware_glove_maps_steady_and_pulsing_motors_to_the_link():
     assert link.calls[-1] == ("stop",)
 
 
-def test_hardware_glove_without_a_port_says_where_to_set_it():
+def test_hardware_glove_without_a_port_says_where_to_set_it(monkeypatch):
+    monkeypatch.setattr("runtime.glove_out.find_glove_port", lambda ports=None: None)  # ignore a real glove
     with pytest.raises(ValueError, match="glove.port"):
         HardwareGlove()
 
