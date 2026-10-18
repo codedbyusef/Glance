@@ -9,6 +9,9 @@ This is a hackathon prototype. It supplements a cane or guide dog and makes no s
 [CLAUDE.md](CLAUDE.md) is the integration spec (how the components are wired together, step by step).
 Each package keeps its own spec or README.
 
+[LIVE_TESTS.md](LIVE_TESTS.md) is the ordered end-to-end live test list (servers, audio, hand band, depth
+calibration, guidance, voice agent, real reaches, hardware glove, Pi).
+
 ## Architecture
 
 ```
